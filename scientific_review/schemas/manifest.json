@@ -1,0 +1,143 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string"
+        },
+        "think": {
+          "const": false
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "seed": {
+          "type": "integer"
+        },
+        "num_ctx": {
+          "type": "integer",
+          "minimum": 8192,
+          "maximum": 262144
+        },
+        "page_num_predict": {
+          "type": "integer",
+          "minimum": 256,
+          "maximum": 16384
+        },
+        "review_num_predict": {
+          "type": "integer",
+          "minimum": 512,
+          "maximum": 32768
+        },
+        "dpi": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 400
+        },
+        "tiles": {
+          "type": "boolean"
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 7200
+        },
+        "page_text_chars": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 200000
+        },
+        "method_text_chars": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 200000
+        },
+        "review_text_chars": {
+          "type": "integer",
+          "minimum": 20000,
+          "maximum": 600000
+        },
+        "method_blocks_per_page": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30
+        },
+        "rubric": {
+          "type": "string"
+        }
+      }
+    },
+    "papers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "doi": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "independence_group": {
+            "type": "string"
+          },
+          "exploratory": {
+            "type": "boolean"
+          },
+          "documents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "method_pages": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "path"
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "id",
+          "documents"
+        ]
+      },
+      "minItems": 1
+    }
+  },
+  "required": [
+    "papers"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

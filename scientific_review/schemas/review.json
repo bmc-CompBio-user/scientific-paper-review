@@ -1,0 +1,346 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "scope": {
+      "type": "string"
+    },
+    "overall_assessment": {
+      "type": "string"
+    },
+    "major_claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "authors_claim": {
+            "type": "string"
+          },
+          "assessment": {
+            "type": "string"
+          },
+          "claim_type": {
+            "type": "string",
+            "enum": [
+              "descriptive",
+              "associational",
+              "causal",
+              "mechanistic",
+              "predictive",
+              "methodological",
+              "other"
+            ]
+          },
+          "interpretation_status": {
+            "type": "string",
+            "enum": [
+              "warranted",
+              "qualified",
+              "speculative",
+              "unsupported",
+              "not_assessable"
+            ]
+          },
+          "evidence_strength": {
+            "type": "string",
+            "enum": [
+              "not_assessable",
+              "very_weak",
+              "weak",
+              "moderate",
+              "strong",
+              "very_strong"
+            ]
+          },
+          "strength_rationale": {
+            "type": "string"
+          },
+          "causal_scope": {
+            "type": "string"
+          },
+          "necessity": {
+            "type": "string",
+            "enum": [
+              "supported",
+              "partly_supported",
+              "not_established",
+              "not_applicable",
+              "unclear"
+            ]
+          },
+          "sufficiency": {
+            "type": "string",
+            "enum": [
+              "supported",
+              "partly_supported",
+              "not_established",
+              "not_applicable",
+              "unclear"
+            ]
+          },
+          "supporting_experiments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "experiment": {
+                  "type": "string"
+                },
+                "design_and_controls": {
+                  "type": "string"
+                },
+                "what_it_establishes": {
+                  "type": "string"
+                },
+                "what_it_does_not_establish": {
+                  "type": "string"
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "experiment",
+                "design_and_controls",
+                "what_it_establishes",
+                "what_it_does_not_establish",
+                "sources"
+              ]
+            },
+            "maxItems": 5
+          },
+          "alternative_explanations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "authors_claim",
+          "assessment",
+          "claim_type",
+          "interpretation_status",
+          "evidence_strength",
+          "strength_rationale",
+          "causal_scope",
+          "necessity",
+          "sufficiency",
+          "supporting_experiments",
+          "alternative_explanations",
+          "sources"
+        ]
+      },
+      "maxItems": 8
+    },
+    "hypotheses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "statement": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "explicit_author_hypothesis",
+              "reviewer_alternative",
+              "prediction",
+              "unresolved_mechanism"
+            ]
+          },
+          "testable_prediction": {
+            "type": "string"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "statement",
+          "status",
+          "testable_prediction",
+          "sources"
+        ]
+      },
+      "maxItems": 8
+    },
+    "scientific_practice": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "dimension": {
+            "type": "string"
+          },
+          "assessment": {
+            "type": "string"
+          },
+          "consequence": {
+            "type": "string"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "dimension",
+          "assessment",
+          "consequence",
+          "sources"
+        ]
+      },
+      "maxItems": 8
+    },
+    "triangulation": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "type": "string"
+          },
+          "evidence_streams": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "orthogonality": {
+            "type": "string"
+          },
+          "shared_dependencies": {
+            "type": "string"
+          },
+          "alternatives_addressed": {
+            "type": "string"
+          },
+          "remaining_limits": {
+            "type": "string"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "claim_id",
+          "evidence_streams",
+          "orthogonality",
+          "shared_dependencies",
+          "alternatives_addressed",
+          "remaining_limits",
+          "sources"
+        ]
+      },
+      "maxItems": 8
+    },
+    "validation_gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "type": "string"
+          },
+          "gap": {
+            "type": "string"
+          },
+          "availability": {
+            "type": "string",
+            "enum": [
+              "not_found_in_reviewed_material",
+              "local_context_only",
+              "unclear",
+              "not_applicable"
+            ]
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "essential_for_claim",
+              "important_strengthening",
+              "optional",
+              "disproportionate"
+            ]
+          },
+          "scientific_consequence": {
+            "type": "string"
+          },
+          "proposed_experiment": {
+            "type": "string"
+          },
+          "competing_predictions": {
+            "type": "string"
+          },
+          "would_change_interpretation": {
+            "type": "string"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "claim_id",
+          "gap",
+          "availability",
+          "priority",
+          "scientific_consequence",
+          "proposed_experiment",
+          "competing_predictions",
+          "would_change_interpretation",
+          "sources"
+        ]
+      },
+      "maxItems": 8
+    },
+    "context_limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "scope",
+    "overall_assessment",
+    "major_claims",
+    "hypotheses",
+    "scientific_practice",
+    "triangulation",
+    "validation_gaps",
+    "context_limitations"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

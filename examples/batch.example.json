@@ -1,0 +1,22 @@
+{
+  "settings": {
+    "model": "qwen3.5:122b-a10b",
+    "host": "http://127.0.0.1:11434",
+    "think": false,
+    "dpi": 240,
+    "tiles": true
+  },
+  "papers": [
+    {
+      "id": "study-001",
+      "title": "Replace with manuscript title",
+      "domain": "Replace with research domain",
+      "independence_group": "independent-study-001",
+      "exploratory": false,
+      "documents": [
+        {"id": "main", "path": "data/inputs/study-001/main.pdf"},
+        {"id": "supp", "path": "data/inputs/study-001/supplement.pdf"}
+      ]
+    }
+  ]
+}

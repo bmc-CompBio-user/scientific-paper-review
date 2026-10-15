@@ -1,0 +1,192 @@
+import json
+import platform
+import sys
+from pathlib import Path
+import jsonschema
+import pymupdf
+from . import __version__
+from .common import PACKAGE, digest, fingerprint, implementation_hash, lock, now, read, safe_id, write
+from .config import load
+from .pdf import extract
+from .provider import call, identity
+
+
+def initialize(config, root):
+    settings = config['settings']
+    protocol = {'settings': settings, 'implementation_sha256': implementation_hash(), 'version': __version__,
+                'python': platform.python_version(), 'pymupdf': pymupdf.__version__, 'jsonschema': __import__('importlib.metadata', fromlist=['version']).version('jsonschema')}
+    path = root/'protocol.json'
+    if path.exists():
+        if read(path)['fingerprint'] != fingerprint(protocol):
+            raise ValueError('Frozen protocol changed (code, prompts, settings or environment); use a new run ID')
+    else:
+        write(path, {'fingerprint': fingerprint(protocol), 'protocol': protocol, 'created': now()})
+    cohort_path = root/'cohort.json'
+    cohort = read(cohort_path) if cohort_path.exists() else {}
+    new = {p['id']: {**p, 'documents': [{**d, 'sha256': digest(d['path'])} for d in p['documents']]} for p in config['papers']}
+    for key, old in cohort.items():
+        if key not in new or new[key] != old:
+            raise ValueError('Existing cohort membership/metadata/input changed: ' + key + '; use a new run ID')
+    write(cohort_path, new)
+
+
+def source_ids(sources):
+    return {s['id'] for p in sources['pages'] for s in p['blocks'] + p['images']}
+
+
+def select_blocks(pages, budget, predicate=lambda p: True):
+    selected, omitted = [], []
+    remaining = budget
+    for page in pages:
+        if not predicate(page):
+            continue
+        for b in page['blocks']:
+            item = '[' + b['id'] + '] ' + b['text']
+            if len(item) <= remaining:
+                selected.append(item)
+                remaining -= len(item)
+            else:
+                omitted.append(b['id'])
+    return '\n\n'.join(selected), omitted
+
+
+def method_context(sources, settings):
+    pages = sources['pages']
+    explicit = lambda p: p['role_hint'] in {'methods_hint', 'methods_candidate'}
+    text, omitted = select_blocks(pages, settings['method_text_chars'], explicit)
+    # Include method-like original blocks outside suggested methods pages, within remaining space.
+    import re
+    candidates = []
+    for p in pages:
+        if not explicit(p):
+            blocks = [b for b in p['blocks'] if re.search(r'\b(replicat|randomi[sz]|blind|statistic|biological repeat|sample size|standard deviation|standard error|p.value|methods?)\b', b['text'], re.I)]
+            candidates.append({**p, 'blocks': blocks[:settings['method_blocks_per_page']]})
+            omitted.extend(b['id'] for b in blocks[settings['method_blocks_per_page']:])
+    more, missed = select_blocks(candidates, max(0, settings['method_text_chars']-len(text)))
+    return text + '\n\n' + more, omitted + missed
+
+
+def inventory(sources):
+    return [{'page': p['id'], 'pdf_page': p['pdf_page'], 'printed_label': p['page_label'], 'role_hint': p['role_hint'],
+             'text_sources': [b['id'] for b in p['blocks']], 'image_sources': [i['id'] for i in p['images']],
+             'caption_candidates': p['caption_candidates'], 'figure_mentions': p.get('figure_mentions', [])} for p in sources['pages']]
+
+
+def page_prompt(page, sources, settings):
+    methods, omitted_methods = method_context(sources, settings)
+    text, omitted = select_blocks([page], settings['page_text_chars'])
+    labels = {m['label'] for m in page.get('figure_mentions', [])} | {c['label'] for c in page['caption_candidates']}
+    caption_ids = {c['source'] for p in sources['pages'] for c in p['caption_candidates'] if c['label'] in labels}
+    related_pages = [{**p, 'blocks': [b for b in p['blocks'] if b['id'] in caption_ids]} for p in sources['pages'] if p['id'] != page['id']]
+    captions, omitted_captions = select_blocks(related_pages, 12000)
+    evidence = {'target_page': page['id'], 'target_pdf_page': page['pdf_page'], 'page_label': page['page_label'],
+                'role_hint': page['role_hint'], 'images_in_order': page['images'],
+                'caption_candidates': page['caption_candidates'],
+                'document_inventory': inventory(sources),
+                'omitted_target_text_blocks': omitted, 'omitted_method_blocks': omitted_methods,
+                'omitted_related_caption_blocks': omitted_captions,
+                'caption_link_status': 'label-matched candidates; ambiguous across documents; human verification required'}
+    prompt = (PACKAGE/'prompts/page-v1.0.0.md').read_text() + '\n\nSOURCE MAP\n' + json.dumps(evidence, ensure_ascii=False) + '\n\nTARGET ORIGINAL TEXT\n' + text + '\n\nORIGINAL METHODS CONTEXT\n' + methods + '\n\nRELATED ORIGINAL CAPTION CANDIDATES\n' + captions
+    return prompt
+
+
+def review_prompt(sources, settings, pages):
+    methods, omitted_methods = method_context(sources, settings)
+    required = '\n\nPAGE EVIDENCE RECORDS (MODEL OUTPUTS, NOT GROUND TRUTH)\n' + json.dumps(pages, ensure_ascii=False)
+    required += '\n\nCOMPLETE SOURCE INVENTORY (NOT ALL SOURCE CONTENT IS IN THIS PROMPT)\n' + json.dumps(inventory(sources), ensure_ascii=False)
+    required += '\n\nORIGINAL METHODS CONTEXT\n' + methods
+    if len(required) > settings['review_text_chars']:
+        raise ValueError('Mandatory review context exceeds review_text_chars. No evidence silently dropped; use a new protocol with a larger context budget')
+    original, omitted_original = select_blocks(sources['pages'], settings['review_text_chars']-len(required), lambda p: p['role_hint'] not in {'references_candidate', 'resources'})
+    return (PACKAGE/'prompts/review-v1.0.0.md').read_text() + required + '\n\nADDITIONAL ORIGINAL TEXT\n' + original + '\n\nCONTEXT COVERAGE\n' + json.dumps({'omitted_method_blocks': omitted_methods,
+        'original_text_blocks_not_repeated_in_additional_context': omitted_original,
+        'images': 'Images were inspected in page stages. No images are attached to this synthesis; page assessments can be wrong.',
+        'warnings': sources['warnings']}, ensure_ascii=False)
+
+
+def render_report(root):
+    cohort = read(root/'cohort.json')
+    lines = ['# Local scientific review batch', '', 'Model-generated interpretations require human scientific review. Operational completion does not certify correctness.', '']
+    for pid, paper in cohort.items():
+        directory = root/'papers'/pid
+        lines.extend(['## ' + pid, '', 'Exploratory: ' + str(paper.get('exploratory', False)), ''])
+        status = read(directory/'status.json') if (directory/'status.json').exists() else {'status': 'not_started'}
+        lines.extend(['Status: ' + status['status'], ''])
+        if status.get('error'):
+            lines.extend(['Operational error: ' + status['error'], ''])
+        review_path = directory/'review.json'
+        if not review_path.exists():
+            continue
+        review = read(review_path)
+        lines.extend([review['scope'], '', review['overall_assessment'], ''])
+        for claim in review['major_claims']:
+            lines.extend(['### ' + claim['id'] + ': ' + claim['authors_claim'], '',
+                'Evidence: ' + claim['evidence_strength'] + '. Interpretation: ' + claim['interpretation_status'] + '.', '',
+                claim['assessment'], '', claim['strength_rationale'], '', 'Causal scope: ' + claim['causal_scope'], '',
+                'Necessity: ' + claim['necessity'] + '; sufficiency: ' + claim['sufficiency'] + '.', '',
+                'Sources: ' + ', '.join(claim['sources']), ''])
+        for key in ('hypotheses', 'scientific_practice', 'triangulation', 'validation_gaps'):
+            lines.extend(['### ' + key.replace('_', ' ').title(), ''])
+            for item in review[key]:
+                lines.extend(['- ' + '; '.join(f'{k}: {json.dumps(v, ensure_ascii=False) if isinstance(v, list) else v}' for k, v in item.items()), ''])
+        lines.extend(['### Context limitations', ''] + ['- ' + item for item in review['context_limitations']] + [''])
+    (root/'report.md').write_text('\n'.join(lines), encoding='utf-8')
+
+
+def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_jobs=None, retry_failed=False):
+    config = load(manifest)
+    root = Path(runs).resolve()/safe_id(run_id)
+    with lock(root):
+        initialize(config, root)
+        papers = config['papers']
+        if paper_ids:
+            unknown = set(paper_ids)-{p['id'] for p in papers}
+            if unknown:
+                raise ValueError('Unknown paper IDs: ' + ', '.join(sorted(unknown)))
+            papers = [p for p in papers if p['id'] in paper_ids]
+        jobs, errors = 0, []
+        provider = None
+        if not prepare:
+            provider = identity(config['settings'])
+            path = root/'provider.json'
+            if path.exists() and read(path) != provider:
+                raise ValueError('Ollama version/model digest changed; choose a new run ID')
+            write(path, provider)
+        for paper in papers:
+            directory = root/'papers'/paper['id']
+            try:
+                sources = extract(paper, directory/'sources', config['settings'])
+                if prepare:
+                    if not (directory/'status.json').exists():
+                        write(directory/'status.json', {'status': 'prepared', 'pages': len(sources['pages'])})
+                    continue
+                write(directory/'status.json', {'status': 'running', 'started': now()})
+                results = []
+                methods, _ = method_context(sources, config['settings'])
+                for page in sources['pages']:
+                    stage = directory/'page_jobs'/page['id']
+                    successful = any((p/'state.json').exists() and read(p/'state.json')['status'] == 'complete' for p in stage.glob('attempt_*'))
+                    if not successful and max_page_jobs is not None and jobs >= max_page_jobs:
+                        write(directory/'status.json', {'status': 'paused_page_limit', 'page_results': len(results), 'total_pages': len(sources['pages'])})
+                        break
+                    result = call(stage, stage='page', prompt=page_prompt(page, sources, config['settings']),
+                        images=[directory/'sources'/i['path'] for i in page['images']], source_ids=source_ids(sources),
+                        settings=config['settings'], retry_failed=retry_failed)
+                    if result['page_id'] != page['id']:
+                        # Keep the scientific response; attribution mismatch is a warning for human review.
+                        write(stage/'attribution_warning.json', {'expected_page': page['id'], 'returned_page': result['page_id']})
+                    results.append(result)
+                    if not successful:
+                        jobs += 1
+                if len(results) != len(sources['pages']):
+                    continue
+                result = call(directory/'review_job', stage='review', prompt=review_prompt(sources, config['settings'], results),
+                    images=[], source_ids=source_ids(sources), settings=config['settings'], retry_failed=retry_failed)
+                write(directory/'review.json', result)
+                write(directory/'status.json', {'status': 'complete', 'ended': now(), 'pages': len(results), 'scientific_accuracy': 'unverified'})
+            except Exception as exc:
+                write(directory/'status.json', {'status': 'failed', 'ended': now(), 'error': str(exc)})
+                errors.append({'paper': paper['id'], 'error': str(exc)})
+        render_report(root)
+        write(root/'last_execution.json', {'ended': now(), 'new_page_jobs': jobs, 'errors': errors, 'prepare_only': prepare})
+        return root, errors

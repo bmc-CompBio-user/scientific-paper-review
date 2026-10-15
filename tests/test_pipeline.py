@@ -1,0 +1,204 @@
+import copy
+import json
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+import pymupdf
+from scientific_review.common import PACKAGE, read, write
+from scientific_review.config import DEFAULTS, load
+from scientific_review.evaluation import evaluate
+from scientific_review.pdf import extract
+from scientific_review.pipeline import execute, review_prompt
+from scientific_review.provider import call, OperationalError, quality_flags, source_schema
+
+
+def pdf(path):
+    document = pymupdf.open()
+    page = document.new_page(width=400, height=500)
+    page.insert_textbox((30, 30, 370, 230), 'SYNTHETIC STUDY. Figure 1. Inhibition of X lowers reporter Y.\nA rescue restores Y. Three independent cultures per group.\nThe authors hypothesize direct regulation; no binding assay is reported.', fontsize=12)
+    page.draw_rect((70, 300, 130, 430), color=(0, 0, 0), fill=(0.2, 0.4, 0.8))
+    page.draw_rect((180, 370, 240, 430), color=(0, 0, 0), fill=(0.8, 0.4, 0.2))
+    page.insert_text((70, 455), 'Control           Inhibited')
+    page = document.new_page(width=400, height=500)
+    page.insert_textbox((30, 30, 370, 450), 'METHOD DETAILS\nCultures were randomly allocated to control, inhibitor, or rescue.\nThree independent cultures per group, technical triplicates averaged.\nReporter fluorescence measured after 24 hours.\nThe rescue uses an inhibitor-resistant X construct.\nNo direct binding or transcription measurement was performed.\nSynthetic fixture for software testing, not real scientific data.', fontsize=12)
+    document.save(path)
+    document.close()
+
+
+def blank(schema):
+    if 'enum' in schema:
+        return schema['enum'][0]
+    kind = schema.get('type')
+    if kind == 'object':
+        return {k: blank(v) for k, v in schema['properties'].items()}
+    if kind == 'array':
+        return []
+    if kind == 'boolean':
+        return False
+    if kind in ('number', 'integer'):
+        return 0
+    return 'Synthetic fixture'
+
+
+def review_value():
+    value = blank(read(PACKAGE/'schemas/review.json'))
+    claim = blank(read(PACKAGE/'schemas/review.json')['properties']['major_claims']['items'])
+    claim['id'] = 'C1'
+    value['major_claims'] = [claim]
+    return value
+
+
+class PipelineTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        pdf(self.root/'input.pdf')
+        self.manifest = self.root/'batch.json'
+        write(self.manifest, {'settings': {'dpi': 100, 'tiles': False}, 'papers': [{'id': 's1', 'independence_group': 'study1',
+            'documents': [{'id': 'main', 'path': 'input.pdf', 'method_pages': [2]}]}]})
+        self.config = load(self.manifest)
+
+    def test_sources_and_supplement_identity(self):
+        paper = copy.deepcopy(self.config['papers'][0])
+        paper['documents'].append({'id': 'supp', 'path': str(self.root/'input.pdf')})
+        result = extract(paper, self.root/'sources', self.config['settings'])
+        self.assertEqual(len(result['pages']), 4)
+        ids = [p['id'] for p in result['pages']]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(result['pages'][1]['role_hint'], 'methods_hint')
+        self.assertEqual(extract(paper, self.root/'sources', self.config['settings']), result)
+        image = self.root/'sources'/result['pages'][0]['images'][0]['path']
+        image.write_bytes(b'corrupt')
+        with self.assertRaisesRegex(ValueError, 'Cached image'):
+            extract(paper, self.root/'sources', self.config['settings'])
+
+    def test_local_only_and_no_thinking(self):
+        for setting in ({'host': 'http://example.com'}, {'think': True}):
+            manifest = read(self.manifest)
+            manifest.setdefault('settings', {}).update(setting)
+            write(self.manifest, manifest)
+            with self.assertRaises(Exception):
+                load(self.manifest)
+            write(self.manifest, {'papers': self.config['papers']})
+
+    def test_frozen_protocol_and_append_only_cohort(self):
+        root, errors = execute(self.manifest, 'r1', self.root/'runs', prepare=True)
+        self.assertFalse(errors)
+        manifest = read(self.manifest)
+        manifest['papers'].append({'id': 's2', 'documents': [{'id': 'main', 'path': 'input.pdf'}]})
+        write(self.manifest, manifest)
+        execute(self.manifest, 'r1', self.root/'runs', prepare=True)
+        manifest['papers'] = manifest['papers'][1:]
+        write(self.manifest, manifest)
+        with self.assertRaisesRegex(ValueError, 'cohort'):
+            execute(self.manifest, 'r1', self.root/'runs', prepare=True)
+        manifest['papers'] = self.config['papers']
+        manifest['settings']['seed'] = 5
+        write(self.manifest, manifest)
+        with self.assertRaisesRegex(ValueError, 'protocol'):
+            execute(self.manifest, 'r1', self.root/'runs', prepare=True)
+
+    def test_call_resume_and_quality_warning_retained(self):
+        value = blank(read(PACKAGE/'schemas/page.json'))
+        value['page_id'] = 'main.p001'
+        obs = blank(read(PACKAGE/'schemas/page.json')['properties']['observations']['items'])
+        obs['sources'] = ['wrong.source']
+        value['observations'] = [obs]
+        calls = []
+        def transport(*args):
+            calls.append(args)
+            return {'done': True, 'done_reason': 'stop', 'message': {'content': json.dumps(value)}}
+        kwargs = dict(stage='page', prompt='English test', images=[], source_ids={'main.p001.b000'}, settings=DEFAULTS, transport=transport)
+        result = call(self.root/'job', **kwargs)
+        self.assertEqual(result, value)
+        self.assertEqual(call(self.root/'job', **kwargs), value)
+        self.assertEqual(len(calls), 1)
+        flags = read(self.root/'job/attempt_001/quality_flags.json')
+        self.assertEqual(flags[0]['kind'], 'unknown_source')
+        self.assertFalse(read(self.root/'job/attempt_001/request.json')['think'])
+        with self.assertRaisesRegex(OperationalError, 'inputs changed'):
+            call(self.root/'job', **{**kwargs, 'prompt': 'changed'})
+
+    def test_failed_attempts_preserved_and_explicit_retry(self):
+        kwargs = dict(stage='page', prompt='test', images=[], source_ids={'main.p001.b000'}, settings=DEFAULTS)
+        for failure in ('length', 'json', 'transport'):
+            folder = self.root/failure
+            def broken(*args):
+                if failure == 'transport':
+                    raise TimeoutError('synthetic timeout')
+                return {'done': True, 'done_reason': 'length' if failure == 'length' else 'stop', 'message': {'content': 'invalid json'}}
+            with self.assertRaises(OperationalError):
+                call(folder, **kwargs, transport=broken)
+            with self.assertRaisesRegex(OperationalError, 'retry-failed'):
+                call(folder, **kwargs, transport=broken)
+            good = blank(read(PACKAGE/'schemas/page.json'))
+            call(folder, **kwargs, retry_failed=True, transport=lambda *a: {'done': True, 'done_reason': 'stop', 'message': {'content': json.dumps(good)}})
+            self.assertEqual(read(folder/'attempt_001/state.json')['status'], 'failed')
+            self.assertEqual(read(folder/'attempt_002/state.json')['status'], 'complete')
+
+    def test_full_mocked_workflow_resume_and_context(self):
+        def transport(host, route, payload=None, timeout=30):
+            if route == '/api/tags':
+                return {'models': [{'name': DEFAULTS['model'], 'digest': 'synthetic-digest'}]}
+            if route == '/api/version':
+                return {'version': 'synthetic'}
+            schema = payload['format']
+            value = blank(schema)
+            if 'page_id' in value:
+                value['page_id'] = 'main.p001' if '"target_page": "main.p001"' in payload['messages'][1]['content'] else 'main.p002'
+            return {'done': True, 'done_reason': 'stop', 'message': {'content': json.dumps(value)}}
+        with patch('scientific_review.provider.http', transport), patch('scientific_review.pipeline.call', side_effect=lambda *a, **k: call(*a, **k, transport=transport)):
+            root, errors = execute(self.manifest, 'full', self.root/'runs', max_page_jobs=1)
+            self.assertFalse(errors)
+            self.assertEqual(read(root/'papers/s1/status.json')['status'], 'paused_page_limit')
+            root, errors = execute(self.manifest, 'full', self.root/'runs')
+            self.assertFalse(errors)
+            self.assertEqual(read(root/'papers/s1/status.json')['status'], 'complete')
+            before = list(root.rglob('attempt_*'))
+            execute(self.manifest, 'full', self.root/'runs')
+            self.assertEqual(before, list(root.rglob('attempt_*')))
+            prompt = (root/'papers/s1/review_job/attempt_001/prompt.txt').read_text()
+            self.assertIn('inhibitor-resistant', prompt)
+            self.assertIn('METHODS CONTEXT', prompt)
+            self.assertIn('NOT GROUND TRUTH', prompt)
+            self.assertTrue((root/'report.md').exists())
+
+    def test_context_overflow_is_explicit(self):
+        sources = extract(self.config['papers'][0], self.root/'sources', self.config['settings'])
+        with self.assertRaisesRegex(ValueError, 'No evidence silently dropped'):
+            review_prompt(sources, {**self.config['settings'], 'review_text_chars': 10}, [])
+
+    def test_human_recurrence_counts_independent_studies(self):
+        run = self.root/'cohort1'
+        cohort = {f'p{i}': {'independence_group': 'same' if i < 2 else f'g{i}', 'exploratory': i == 4} for i in range(5)}
+        write(run/'cohort.json', cohort)
+        rows = []
+        for pid, paper in cohort.items():
+            write(run/'papers'/pid/'review.json', review_value())
+            rows.append({'paper_id': pid, 'run_id': 'cohort1', 'claim_id': 'C1', 'family': 'causal_overreach',
+                'severity': 'material', 'confirmed': True, 'origin': 'model_reasoning', 'independence_group': paper['independence_group'],
+                'notes': 'Human verified synthetic annotation', 'source_reference': 'main.p001'})
+        annotations = self.root/'annotations.jsonl'
+        annotations.write_text('\n'.join(json.dumps(r) for r in rows))
+        result = evaluate(annotations, run, self.root/'evaluation.json')
+        self.assertEqual(result['families'][0]['count'], 3)
+        self.assertTrue(result['families'][0]['recurrence_candidate'])
+        self.assertFalse(result['annotations'][-1]['eligible_for_recurrence'])
+        rows[2]['confirmed'] = False
+        annotations.write_text('\n'.join(json.dumps(r) for r in rows))
+        self.assertFalse(evaluate(annotations, run, self.root/'evaluation.json')['families'][0]['recurrence_candidate'])
+
+    def test_dynamic_schema_and_claim_links(self):
+        schema = source_schema('review', {'main.p001.b000'})
+        self.assertEqual(schema['properties']['major_claims']['items']['properties']['sources']['items']['enum'], ['main.p001.b000'])
+        value = review_value()
+        gap = blank(schema['properties']['validation_gaps']['items'])
+        gap['claim_id'] = 'unknown'
+        value['validation_gaps'] = [gap]
+        self.assertTrue(any(f['kind'] == 'unknown_claim_link' for f in quality_flags(value, set(), 'review')))
+
+
+if __name__ == '__main__':
+    unittest.main()

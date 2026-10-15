@@ -1,0 +1,99 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "page_id": {
+      "type": "string"
+    },
+    "page_scope": {
+      "type": "string"
+    },
+    "page_kind": {
+      "type": "string",
+      "enum": [
+        "results",
+        "methods",
+        "mixed",
+        "model",
+        "references",
+        "resources",
+        "cover",
+        "other"
+      ]
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "statement": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "observation",
+              "author_report",
+              "interpretation",
+              "hypothesis"
+            ]
+          },
+          "design": {
+            "type": "string"
+          },
+          "controls_and_validation": {
+            "type": "string"
+          },
+          "methods_and_statistics": {
+            "type": "string"
+          },
+          "uncertainty": {
+            "type": "string"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "statement",
+          "kind",
+          "design",
+          "controls_and_validation",
+          "methods_and_statistics",
+          "uncertainty",
+          "sources"
+        ]
+      },
+      "maxItems": 6
+    },
+    "context_limits": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "hypotheses": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "page_id",
+    "page_scope",
+    "page_kind",
+    "observations",
+    "context_limits",
+    "hypotheses"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -1,0 +1,79 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "paper_id": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "claim_id": {
+      "type": "string"
+    },
+    "family": {
+      "type": "string",
+      "enum": [
+        "causal_overreach",
+        "necessity_sufficiency",
+        "hypothesis_as_fact",
+        "evidence_ranking",
+        "missed_triangulation",
+        "false_orthogonality",
+        "shared_dependency",
+        "missed_validation",
+        "false_missing_validation",
+        "design_controls",
+        "replication_independence",
+        "statistics_interpretation",
+        "method_integration",
+        "visual_interpretation",
+        "other_scientific",
+        "citation_format"
+      ]
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "minor",
+        "material",
+        "major"
+      ]
+    },
+    "confirmed": {
+      "type": "boolean"
+    },
+    "origin": {
+      "type": "string",
+      "enum": [
+        "model_reasoning",
+        "extraction",
+        "missing_input",
+        "workflow",
+        "unclear"
+      ]
+    },
+    "independence_group": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "source_reference": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "paper_id",
+    "run_id",
+    "claim_id",
+    "family",
+    "severity",
+    "confirmed",
+    "origin",
+    "independence_group",
+    "notes",
+    "source_reference"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

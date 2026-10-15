@@ -1,0 +1,22 @@
+# Public repository uses an allowlist. PDFs, existing benchmarks, grants, models,
+# request/response logs and unpublished manuscripts stay local by default.
+/*
+!/.gitignore
+!/README.md
+!/pyproject.toml
+!/requirements.lock
+!/scientific_review/
+!/tests/
+!/docs/
+!/examples/
+!/.github/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.DS_Store
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.jsonl
+# Annotate locally; JSONL example is documented in Markdown, not tracked.
