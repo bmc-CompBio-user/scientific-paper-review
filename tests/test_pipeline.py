@@ -9,7 +9,7 @@ from scientific_review.common import PACKAGE, read, write
 from scientific_review.config import DEFAULTS, load
 from scientific_review.evaluation import evaluate
 from scientific_review.pdf import extract
-from scientific_review.pipeline import execute, review_prompt
+from scientific_review.pipeline import execute, review_prompt, page_prompt
 from scientific_review.provider import call, OperationalError, quality_flags, source_schema
 
 
@@ -73,6 +73,24 @@ class PipelineTests(unittest.TestCase):
         image.write_bytes(b'corrupt')
         with self.assertRaisesRegex(ValueError, 'Cached image'):
             extract(paper, self.root/'sources', self.config['settings'])
+
+    def test_unlabelled_figure_gets_separate_legend_continuations(self):
+        sources = extract(self.config['papers'][0], self.root/'sources', self.config['settings'])
+        figure = sources['pages'][0]
+        figure['figure_mentions'] = []
+        figure['caption_candidates'] = []
+        legend = sources['pages'][1]
+        legend['caption_candidates'] = [{'source': 'main.p002.b100', 'label': 'Figure 1'}]
+        legend['blocks'] = [{'id': 'main.p002.b100', 'text': 'Figure 1. Legend starts.'},
+                            {'id': 'main.p002.b101', 'text': 'Continuation: independent cultures and error-bar definition.'}]
+        prompt = page_prompt(figure, sources, self.config['settings'])
+        supplied = prompt.split('RELATED ORIGINAL CAPTION CANDIDATES\n')[-1]
+        self.assertIn('main.p002.b101', supplied)
+        self.assertIn('independent cultures', supplied)
+        self.assertIn('unlinked legend candidates', prompt)
+        figure['figure_mentions'] = [{'label': 'Figure 2'}]
+        prompt = page_prompt(figure, sources, self.config['settings'])
+        self.assertEqual(prompt.split('RELATED ORIGINAL CAPTION CANDIDATES\n')[-1], '')
 
     def test_local_only_and_no_thinking(self):
         for setting in ({'host': 'http://example.com'}, {'think': True}):

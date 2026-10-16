@@ -76,7 +76,19 @@ def page_prompt(page, sources, settings):
     methods, omitted_methods = method_context(sources, settings)
     text, omitted = select_blocks([page], settings['page_text_chars'])
     labels = {m['label'] for m in page.get('figure_mentions', [])} | {c['label'] for c in page['caption_candidates']}
-    caption_ids = {c['source'] for p in sources['pages'] for c in p['caption_candidates'] if c['label'] in labels}
+    # Separate legend pages often have multiple text blocks and figure images may
+    # contain no extractable figure number. Supply candidates without claiming a
+    # semantic match; never drop continuation blocks merely because they lack a heading.
+    caption_ids = set()
+    all_captions = not labels
+    for source_page in sources['pages']:
+        starts = {c['source']: c['label'] for c in source_page['caption_candidates']}
+        include = False
+        for block in source_page['blocks']:
+            if block['id'] in starts:
+                include = all_captions or starts[block['id']] in labels
+            if include:
+                caption_ids.add(block['id'])
     related_pages = [{**p, 'blocks': [b for b in p['blocks'] if b['id'] in caption_ids]} for p in sources['pages'] if p['id'] != page['id']]
     captions, omitted_captions = select_blocks(related_pages, 12000)
     evidence = {'target_page': page['id'], 'target_pdf_page': page['pdf_page'], 'page_label': page['page_label'],
@@ -85,7 +97,7 @@ def page_prompt(page, sources, settings):
                 'document_inventory': inventory(sources),
                 'omitted_target_text_blocks': omitted, 'omitted_method_blocks': omitted_methods,
                 'omitted_related_caption_blocks': omitted_captions,
-                'caption_link_status': 'label-matched candidates; ambiguous across documents; human verification required'}
+                'caption_link_status': ('unlinked legend candidates because no figure number was extracted; inspect the images to assess relevance' if all_captions else 'label-matched candidates with possible continuation blocks; human verification required')}
     prompt = (PACKAGE/'prompts/page-v1.0.0.md').read_text() + '\n\nSOURCE MAP\n' + json.dumps(evidence, ensure_ascii=False) + '\n\nTARGET ORIGINAL TEXT\n' + text + '\n\nORIGINAL METHODS CONTEXT\n' + methods + '\n\nRELATED ORIGINAL CAPTION CANDIDATES\n' + captions
     return prompt
 
