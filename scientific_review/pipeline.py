@@ -9,6 +9,7 @@ from .common import PACKAGE, digest, fingerprint, implementation_hash, lock, now
 from .config import load
 from .pdf import extract
 from .provider import call, identity
+from .reuse import import_page_job
 
 
 def initialize(config, root):
@@ -145,11 +146,23 @@ def render_report(root):
     (root/'report.md').write_text('\n'.join(lines), encoding='utf-8')
 
 
-def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_jobs=None, retry_failed=False):
+def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_jobs=None, retry_failed=False, reuse_completed_from=None):
     config = load(manifest)
     root = Path(runs).resolve()/safe_id(run_id)
     with lock(root):
         initialize(config, root)
+        plan_path = root/'reuse_plan.json'
+        if plan_path.exists():
+            saved = read(plan_path)['source_run']
+            if reuse_completed_from and str(Path(reuse_completed_from).resolve()) != saved:
+                raise ValueError('Reuse origin changed; choose a new run ID')
+            reuse_completed_from = saved
+        elif reuse_completed_from:
+            reuse_completed_from = str(Path(reuse_completed_from).resolve())
+            if Path(reuse_completed_from) == root:
+                raise ValueError('Cannot import a run into itself')
+            write(plan_path, {'source_run': reuse_completed_from, 'created': now(),
+                'scope': 'Completed page calls only; exact context/model/images checked. Failed attempts remain at origin. Original output settings retained per imported call.'})
         papers = config['papers']
         if paper_ids:
             unknown = set(paper_ids)-{p['id'] for p in papers}
@@ -163,6 +176,8 @@ def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_j
             path = root/'provider.json'
             if path.exists() and read(path) != provider:
                 raise ValueError('Ollama version/model digest changed; choose a new run ID')
+            if reuse_completed_from and read(Path(reuse_completed_from)/'provider.json') != provider:
+                raise ValueError('Imported run uses a different provider/model identity')
             write(path, provider)
         for paper in papers:
             directory = root/'papers'/paper['id']
@@ -177,6 +192,8 @@ def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_j
                 methods, _ = method_context(sources, config['settings'])
                 for page in sources['pages']:
                     stage = directory/'page_jobs'/page['id']
+                    if reuse_completed_from:
+                        import_page_job(Path(reuse_completed_from)/'papers'/paper['id']/'page_jobs'/page['id'], stage, reuse_completed_from)
                     successful = any((p/'state.json').exists() and read(p/'state.json')['status'] == 'complete' for p in stage.glob('attempt_*'))
                     if not successful and max_page_jobs is not None and jobs >= max_page_jobs:
                         write(directory/'status.json', {'status': 'paused_page_limit', 'page_results': len(results), 'total_pages': len(sources['pages'])})

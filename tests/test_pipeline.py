@@ -11,6 +11,7 @@ from scientific_review.evaluation import evaluate
 from scientific_review.pdf import extract
 from scientific_review.pipeline import execute, review_prompt, page_prompt
 from scientific_review.provider import call, OperationalError, quality_flags, source_schema
+from scientific_review.reuse import import_page_job
 
 
 def pdf(path):
@@ -139,6 +140,47 @@ class PipelineTests(unittest.TestCase):
         with self.assertRaisesRegex(OperationalError, 'inputs changed'):
             call(self.root/'job', **{**kwargs, 'prompt': 'changed'})
 
+    def test_explicit_import_preserves_original_request_and_checks_context(self):
+        value = blank(read(PACKAGE/'schemas/page.json'))
+        old_schema = source_schema('page', {'main.p001.b000'})
+        # The previous protocol did not cap citation arrays.
+        old_schema['properties']['observations']['items']['properties']['sources'].pop('maxItems')
+        settings = {**DEFAULTS, 'page_num_predict': 4096}
+        kwargs = dict(stage='page', prompt='identical original scientific context', images=[], source_ids={'main.p001.b000'}, settings=settings)
+        calls = []
+        def transport(*args):
+            calls.append(args)
+            return {'done': True, 'done_reason': 'stop', 'message': {'content': json.dumps(value)}}
+        with patch('scientific_review.provider.source_schema', return_value=old_schema):
+            call(self.root/'old', **kwargs, transport=transport)
+        original = (self.root/'old/attempt_001/request.json').read_bytes()
+        import_page_job(self.root/'old', self.root/'new', self.root/'origin-run')
+        current = {**kwargs, 'settings': {**settings, 'page_num_predict': 8192}}
+        self.assertEqual(call(self.root/'new', **current, transport=transport), value)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual((self.root/'new/attempt_001/request.json').read_bytes(), original)
+        proof = read(self.root/'new/reuse_verified.json')
+        self.assertEqual(proof['original_num_predict'], 4096)
+        self.assertEqual(proof['current_num_predict'], 8192)
+        with self.assertRaisesRegex(ValueError, 'scientific context'):
+            call(self.root/'new', **{**current, 'prompt': 'different scientific context'}, transport=transport)
+        with self.assertRaisesRegex(ValueError, 'scientific context'):
+            call(self.root/'new', **{**current, 'settings': {**current['settings'], 'num_ctx': 8192}}, transport=transport)
+        image = self.root/'changed.png'
+        image.write_bytes(b'changed image data')
+        with self.assertRaisesRegex(ValueError, 'source content'):
+            call(self.root/'new', **{**current, 'images': [image]}, transport=transport)
+        modified = read(self.root/'new/attempt_001/result.json')
+        modified['page_scope'] = 'tampered'
+        write(self.root/'new/attempt_001/result.json', modified)
+        with self.assertRaisesRegex(ValueError, 'raw response'):
+            call(self.root/'new', **current, transport=transport)
+
+    def test_failed_jobs_are_never_imported(self):
+        write(self.root/'old/attempt_001/state.json', {'status':'failed'})
+        import_page_job(self.root/'old', self.root/'new', self.root/'origin-run')
+        self.assertFalse((self.root/'new').exists())
+
     def test_failed_attempts_preserved_and_explicit_retry(self):
         kwargs = dict(stage='page', prompt='test', images=[], source_ids={'main.p001.b000'}, settings=DEFAULTS)
         for failure in ('length', 'json', 'transport'):
@@ -182,6 +224,15 @@ class PipelineTests(unittest.TestCase):
             self.assertIn('METHODS CONTEXT', prompt)
             self.assertIn('NOT GROUND TRUTH', prompt)
             self.assertTrue((root/'report.md').exists())
+            config = read(self.manifest)
+            config['settings']['page_num_predict'] = 8192
+            write(self.manifest, config)
+            imported_root, errors = execute(self.manifest, 'imported', self.root/'runs', reuse_completed_from=root)
+            self.assertFalse(errors)
+            self.assertEqual(read(imported_root/'papers/s1/status.json')['status'], 'complete')
+            self.assertEqual(len(list(imported_root.glob('papers/s1/page_jobs/*/reuse_verified.json'))), 2)
+            self.assertTrue((imported_root/'papers/s1/review_job/attempt_001/result.json').exists())
+
 
     def test_context_overflow_is_explicit(self):
         sources = extract(self.config['papers'][0], self.root/'sources', self.config['settings'])
@@ -211,6 +262,7 @@ class PipelineTests(unittest.TestCase):
     def test_dynamic_schema_and_claim_links(self):
         schema = source_schema('review', {'main.p001.b000'})
         self.assertEqual(schema['properties']['major_claims']['items']['properties']['sources']['items']['enum'], ['main.p001.b000'])
+        self.assertEqual(schema['properties']['major_claims']['items']['properties']['sources']['maxItems'], 8)
         value = review_value()
         gap = blank(schema['properties']['validation_gaps']['items'])
         gap['claim_id'] = 'unknown'

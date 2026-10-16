@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 import jsonschema
 from .common import PACKAGE, digest, now, read, write, fingerprint
+from .reuse import verify_reuse
 
 
 class OperationalError(RuntimeError):
@@ -38,6 +39,7 @@ def source_schema(name, source_ids):
             for key, value in list(node.items()):
                 if key == 'sources' and isinstance(value, dict):
                     value['items'] = {'type': 'string', 'enum': sorted(source_ids)}
+                    value['maxItems'] = 8
                 else:
                     visit(value)
         elif isinstance(node, list):
@@ -91,6 +93,8 @@ def call(folder, *, stage, prompt, images, source_ids, settings, retry_failed=Fa
     if attempts:
         previous = attempts[-1]
         state = read(previous / 'state.json') if (previous/'state.json').exists() else {'status': 'interrupted'}
+        if state['status'] == 'complete' and (folder/'reuse.json').exists():
+            return verify_reuse(folder, previous, payload, [digest(p) for p in images], source_ids)
         if (previous/'input.json').exists() and read(previous/'input.json')['fingerprint'] != input_identity:
             raise OperationalError('Stage inputs changed; choose a new run ID')
         if state['status'] == 'complete':

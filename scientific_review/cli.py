@@ -20,6 +20,7 @@ def main(argv=None):
         if name == 'run':
             p.add_argument('--max-page-jobs', type=int)
             p.add_argument('--retry-failed', action='store_true')
+            p.add_argument('--reuse-completed-from', help='Explicit earlier run root; compatible completed page calls retain their original requests')
     p = sub.add_parser('doctor')
     p.add_argument('manifest')
     p = sub.add_parser('report')
@@ -46,7 +47,7 @@ def main(argv=None):
             if limit is not None and limit < 1:
                 raise ValueError('--max-page-jobs must be positive')
             root, errors = execute(args.manifest, args.run_id, args.runs, prepare=args.command == 'prepare',
-                paper_ids=args.paper, max_page_jobs=limit, retry_failed=getattr(args, 'retry_failed', False))
+                paper_ids=args.paper, max_page_jobs=limit, retry_failed=getattr(args, 'retry_failed', False), reuse_completed_from=getattr(args, 'reuse_completed_from', None))
             print(json.dumps({'run': str(root), 'errors': errors}, indent=2))
             return 1 if errors else 0
     except Exception as exc:
