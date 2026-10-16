@@ -20,3 +20,6 @@ __pycache__/
 *.jpeg
 *.jsonl
 # Annotate locally; JSONL example is documented in Markdown, not tracked.
+
+# Project-local report exports remain private, even if the root allowlist changes.
+/outputs/

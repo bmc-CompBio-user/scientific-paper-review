@@ -38,6 +38,10 @@ Add about 20 paper entries to the manifest, or append them gradually. Existing e
 
 The local run directory contains `report.md`, `protocol.json`, `provider.json`, `cohort.json`, and per-paper sources, page jobs, review, and operational status. Each attempt preserves the exact request (including image bytes), prompt, response, timing and token metrics, parsed result, quality flags and errors. These logs contain manuscript content and can consume substantial disk space. They remain local and ignored by Git.
 
+## Output location
+
+Run commands from the project working directory. Raw reproducibility artifacts default to `data/runs/<run-id>/` within that directory. Store readable report exports, comparisons and source-page images in the project-root `outputs/` directory, rather than in a separate application workspace. Both `data/` and `outputs/` remain local and excluded from Git; moving report exports does not change the saved model responses or rerun inference.
+
 ## What images and sources mean
 
 PyMuPDF extracts all text blocks and renders each page at 240 DPI, with a full-page overview and four overlapping uniform tiles. **These are not automatically segmented scientific figures.** Text-based figure and caption matches are explicitly unverified candidates; complex layouts, panel boundaries, symbols and reading order can remain ambiguous. No manual figure crops are required.
