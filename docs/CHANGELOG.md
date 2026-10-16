@@ -1,5 +1,11 @@
 # Changes
 
+## 1.0.3
+
+Bound previously unbounded review-output lists to eight items. This prevents runaway repetition inside fields such as triangulation evidence streams. Existing limits are preserved; the page-analysis format and scientific prompts are unchanged.
+
+Source augmentation can retain completed expanded-context page calls explicitly with `--reuse-added-pages-from`. The full source package and provider must match, and each imported request is verified by the existing exact-input checks. Earlier-context main records remain distinct from those exact expanded-context cache entries. Failed syntheses remain preserved in their original run.
+
 ## Source-augmentation helper
 
 Add an explicitly fingerprinted orchestration helper for additional PDF sources. Earlier-context page records retain their original provenance and are distinguished from new page analyses under the expanded source package. A fresh combined synthesis receives both records and original text/methods. Four synthetic regression checks reject changed/removed earlier sources or altered page images; sixteen offline tests pass in total. Scientific prompts and the existing package implementation are unchanged.

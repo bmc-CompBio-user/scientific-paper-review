@@ -36,6 +36,8 @@ def source_schema(name, source_ids):
     schema = copy.deepcopy(read(PACKAGE / 'schemas' / (name + '.json')))
     def visit(node):
         if isinstance(node, dict):
+            if name == 'review' and node.get('type') == 'array':
+                node.setdefault('maxItems', 8)
             for key, value in list(node.items()):
                 if key == 'sources' and isinstance(value, dict):
                     value['items'] = {'type': 'string', 'enum': sorted(source_ids)}

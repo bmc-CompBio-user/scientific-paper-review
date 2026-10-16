@@ -16,6 +16,7 @@ from scientific_review.config import load
 from scientific_review.pdf import extract
 from scientific_review.pipeline import initialize, page_prompt, review_prompt, source_ids, render_report
 from scientific_review.provider import call, identity
+from scientific_review.reuse import import_page_job
 
 UPDATE_NOTE = '''SOURCE-PACKAGE UPDATE
 The input records identify their analysis context in _analysis_provenance. Earlier-context records were generated before the added documents were supplied. They are preserved provisional observations, not fresh page analyses with the expanded source package. The original text, methods and newly analysed pages are now available for the combined assessment. Reassess earlier missing-context statements and validation-gap claims against the expanded supplied material; do not carry them forward as established study-wide absences. This is the same study with additional sources, not independent replication. Preserve uncertainty if the expanded evidence does not resolve a question.
@@ -61,7 +62,7 @@ def prior_record(prior_paper, page):
     return result, proof
 
 
-def augment(manifest, run_id, prior_run, runs='data/runs', paper_id=None, retry_failed=False):
+def augment(manifest, run_id, prior_run, runs='data/runs', paper_id=None, retry_failed=False, reuse_added_pages_from=None):
     config = load(manifest)
     papers = config['papers']
     if paper_id:
@@ -78,7 +79,12 @@ def augment(manifest, run_id, prior_run, runs='data/runs', paper_id=None, retry_
     started = time.monotonic()
     with lock(root):
         initialize(config, root)
+        if reuse_added_pages_from:
+            reuse_added_pages_from = str(Path(reuse_added_pages_from).resolve())
+            if Path(reuse_added_pages_from) == root:
+                raise ValueError('Cannot import current-context page calls from the target run itself')
         policy = {'mode': 'source_augmentation', 'prior_run': str(prior_run),
+            'reuse_added_pages_from': reuse_added_pages_from,
             'orchestration_sha256': digest(Path(__file__).resolve()),
             'policy': 'Earlier page records retain their earlier source context; only added pages are newly analysed. All source text and records enter a fresh combined synthesis. This is not exact-context cache reuse or an independent study.'}
         policy_path = root/'augmentation.json'
@@ -101,6 +107,14 @@ def augment(manifest, run_id, prior_run, runs='data/runs', paper_id=None, retry_
         if (root/'provider.json').exists() and read(root/'provider.json') != provider:
             raise ValueError('Provider changed within the expanded run')
         write(root/'provider.json', provider)
+        if reuse_added_pages_from:
+            compatible = Path(reuse_added_pages_from)
+            if read(compatible/'provider.json') != provider:
+                raise ValueError('Current-context reuse has a different model/provider identity')
+            reused_sources = read(compatible/'papers'/paper['id']/'sources/sources.json')
+            reused_ids = unchanged_prior_pages(reused_sources, sources)
+            if reused_ids != {p['id'] for p in sources['pages']}:
+                raise ValueError('Current-context reuse requires the same full source package')
         record_map = {}
         proofs = []
         for page in old_sources['pages']:
@@ -122,6 +136,9 @@ def augment(manifest, run_id, prior_run, runs='data/runs', paper_id=None, retry_
                 'prior_page_records': len(old_ids), 'new_page_analyses': 0, 'total_source_pages': len(sources['pages'])})
             for index, page in enumerate(added, 1):
                 print(f'Added page {index}/{len(added)}: {page["id"]}', flush=True)
+                if reuse_added_pages_from:
+                    import_page_job(Path(reuse_added_pages_from)/'papers'/paper['id']/'page_jobs'/page['id'],
+                                    directory/'page_jobs'/page['id'], reuse_added_pages_from)
                 value = call(directory/'page_jobs'/page['id'], stage='page',
                     prompt=page_prompt(page, sources, config['settings']),
                     images=[directory/'sources'/im['path'] for im in page['images']],
@@ -161,7 +178,8 @@ if __name__ == '__main__':
     parser.add_argument('--runs', default='data/runs')
     parser.add_argument('--paper')
     parser.add_argument('--retry-failed', action='store_true')
+    parser.add_argument('--reuse-added-pages-from', help='Earlier run with identical expanded-context page inputs; all reuse is verified')
     args = parser.parse_args()
-    root, errors = augment(args.manifest, args.run_id, args.prior_run, args.runs, args.paper, args.retry_failed)
+    root, errors = augment(args.manifest, args.run_id, args.prior_run, args.runs, args.paper, args.retry_failed, args.reuse_added_pages_from)
     print(json.dumps({'run': str(root), 'errors': errors}, indent=2))
     raise SystemExit(1 if errors else 0)

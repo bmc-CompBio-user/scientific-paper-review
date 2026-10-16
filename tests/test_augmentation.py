@@ -22,4 +22,9 @@ class SourceExpansionTests(unittest.TestCase):
  def test_removed_main_rejected(self):
   self.current['documents']=self.current['documents'][1:]
   with self.assertRaisesRegex(ValueError,'removed or changed'):module.unchanged_prior_pages(self.old,self.current)
+ def test_current_context_cache_rejects_changed_supplement(self):
+  previous_expanded = copy.deepcopy(self.current)
+  self.current['documents'][1]['sha256']='changed-supplement'
+  with self.assertRaisesRegex(ValueError,'removed or changed'):
+   module.unchanged_prior_pages(previous_expanded,self.current)
 if __name__=='__main__':unittest.main()

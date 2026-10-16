@@ -263,6 +263,10 @@ class PipelineTests(unittest.TestCase):
         schema = source_schema('review', {'main.p001.b000'})
         self.assertEqual(schema['properties']['major_claims']['items']['properties']['sources']['items']['enum'], ['main.p001.b000'])
         self.assertEqual(schema['properties']['major_claims']['items']['properties']['sources']['maxItems'], 8)
+        self.assertEqual(schema['properties']['triangulation']['items']['properties']['evidence_streams']['maxItems'], 8)
+        self.assertEqual(schema['properties']['major_claims']['items']['properties']['alternative_explanations']['maxItems'], 8)
+        self.assertEqual(schema['properties']['context_limitations']['maxItems'], 8)
+        self.assertNotIn('maxItems', source_schema('page', {'main.p001.b000'})['properties']['context_limits'])
         value = review_value()
         gap = blank(schema['properties']['validation_gaps']['items'])
         gap['claim_id'] = 'unknown'
