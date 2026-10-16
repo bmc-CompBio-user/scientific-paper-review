@@ -46,3 +46,15 @@ paper-review run batch-recovery.local.json --run-id recovery-01 --reuse-complete
 The new manifest must point to the same scientific source package. Each imported call is checked against the current scientific prompt, images, source IDs, model identity and options; only output ceilings and citation-list ceilings may differ. Original requests and generation settings are retained and marked with `reuse.json` and `reuse_verified.json`. The imported result is checked against its saved raw response. A changed scientific input, different model, reduced output ceiling, tampered response or incompatible schema rejects reuse. Failed attempts remain at the original run; the new run generates those stages afresh. A fresh final synthesis is always performed.
 
 This is an explicitly composite recovery run, not a homogeneous independent repeat under the new protocol. Preserve the reuse plan and per-call provenance when comparing benchmark results. Ordinary same-protocol retries continue to use `--retry-failed`.
+
+## Additional source documents after a completed review
+
+To analyse newly supplied PDF supplements and regenerate a combined assessment, use the source-augmentation helper:
+
+```sh
+python examples/augment_sources.py batch-with-supplement.local.json --run-id expanded-01 --prior-run data/runs/original-01 --paper study-001
+```
+
+Include the original document(s) and new PDF document(s) in the expanded manifest. Earlier documents, extracted blocks and image hashes must match their prior representations. The helper validates the earlier normally completed requests and responses, then labels their page records explicitly as earlier-context evidence. It analyses added pages with the expanded source package and produces a fresh synthesis using all page records and selected original text and methods, with budget-related omissions recorded. This is evidence augmentation, not exact-context cache reuse: earlier page records are not represented as freshly analysed with the new documents. Old local context limitations must be reconsidered against newly supplied material.
+
+The same study with a supplement is not an independent study or replication. Preserve its independence group. The helper and its orchestration snapshot are fingerprinted in `augmentation.json`; per-page earlier evidence has original request/response hashes and generation settings. The earlier run remains intact. Use the original helper or saved orchestration snapshot to resume; changed orchestration requires a new run ID.

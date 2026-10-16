@@ -1,5 +1,9 @@
 # Changes
 
+## Source-augmentation helper
+
+Add an explicitly fingerprinted orchestration helper for additional PDF sources. Earlier-context page records retain their original provenance and are distinguished from new page analyses under the expanded source package. A fresh combined synthesis receives both records and original text/methods. Four synthetic regression checks reject changed/removed earlier sources or altered page images; sixteen offline tests pass in total. Scientific prompts and the existing package implementation are unchanged.
+
 ## 1.0.2
 
 Cap generated citation lists at eight source IDs per item. This prevents plot-label enumeration from exhausting output tokens, without changing scientific prompts or treating scientific mistakes as operational failures. Structural quality warnings remain separate from scientific evaluation.
