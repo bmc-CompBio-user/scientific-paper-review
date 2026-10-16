@@ -34,6 +34,6 @@ The second command repetition should reuse the three completed attempts. A local
 
 ## Scope
 
-The original 25-page Baldi PDF was prepared locally as 125 page/tile images and 715 text blocks. A bounded production vision call on the original Figure 5 page completed normally in 101.6 seconds (35,920 input tokens; 1,875 output tokens), producing six observations and no mechanical source warnings. Its exact request, response and metrics remain local. This is a one-page scientific-source integration check, not a whole-paper production review. The earlier exploratory full-paper experiment remains in the local legacy folder. That earlier experiment used a different workflow and is not presented as a full-run validation of the frozen production protocol. A production review of approximately 20 independent real manuscripts has not yet been completed.
+A production evaluation across approximately 20 independent real manuscripts has not yet been completed. Scientific accuracy requires human assessment across that cohort.
 
 For new papers, first inspect the preparation manifest and run a bounded few-page test. Verify original legend/method retrieval and image readability before scaling. No test establishes perfect figure segmentation, exhaustive retrieval, universal context-length support, or correct causal interpretation.
