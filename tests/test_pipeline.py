@@ -308,5 +308,67 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(stage_schema('review', settings).name, 'review-v1.1.1.json')
 
 
+    def test_crosscheck_quote_verification_and_schema(self):
+        from scientific_review.pipeline import verify_quotes
+        sources = {'pages': [{'blocks': [{'id': 'main.p001.b000', 'text': 'Cells were treated with 500 ng\nRNA ("single") for 24 h; FDR < 0.1 was used.'}]}]}
+        passage = lambda source, quote: {'source': source, 'quote': quote}
+        result = {'checks': [{'passages': [passage('main.p001.b000', "treated with 500 ng RNA (single) for 24 h"),
+                                           passage('main.p001.b000', 'Cells were ... FDR < 0.1'),
+                                           passage('main.p001.b000', 'FDR < 0.05 was used'),
+                                           passage('main.p009.b000', 'FDR < 0.1'),
+                                           passage('main.p001.b000', '')]}]}
+        verified = [p['quote_verified'] for p in verify_quotes(result, sources)['checks'][0]['passages']]
+        self.assertEqual(verified, [True, True, False, False, False])
+        schema = source_schema('crosscheck', {'main.p001.b000'}, {'rubric': 'scientific-method-v1.2.0'})
+        self.assertEqual(schema['properties']['checks']['items']['properties']['passages']['items']['properties']['source']['enum'], ['main.p001.b000'])
+        value = blank(schema)
+        value['checks'] = [{**blank(schema['properties']['checks']['items']), 'passages': [passage('wrong.source', 'x')]}]
+        self.assertTrue(any(f['kind'] == 'unknown_source' for f in quality_flags(value, {'main.p001.b000'}, 'crosscheck')))
+
+    def test_rubric_v120_runs_crosscheck_before_review(self):
+        import re
+        def transport(host, route, payload=None, timeout=30):
+            if route == '/api/tags':
+                return {'models': [{'name': DEFAULTS['model'], 'digest': 'synthetic-digest'}]}
+            if route == '/api/version':
+                return {'version': 'synthetic'}
+            value = blank(payload['format'])
+            content = payload['messages'][1]['content']
+            if 'page_id' in value:
+                value['page_id'] = 'main.p001' if '"target_page": "main.p001"' in content else 'main.p002'
+            if 'checks' in value:
+                block = re.search(r'\[(main\.p\d+\.b\d+)\] [^\[]*?Three independent cultures per group', content)[1]
+                check = blank(payload['format']['properties']['checks']['items'])
+                check.update(id='X1', topic='replicates', passages=[{'source': block, 'quote': 'Three independent cultures per group'},
+                                                                    {'source': block, 'quote': 'Seven invented cultures per group'}])
+                value['checks'] = [check]
+            return {'done': True, 'done_reason': 'stop', 'message': {'content': json.dumps(value)}}
+        config = read(self.manifest)
+        config['settings']['rubric'] = 'scientific-method-v1.2.0'
+        write(self.manifest, config)
+        with patch('scientific_review.provider.http', transport), patch('scientific_review.pipeline.call', side_effect=lambda *a, **k: call(*a, **k, transport=transport)):
+            root, errors = execute(self.manifest, 'cc', self.root/'runs')
+            self.assertFalse(errors)
+            self.assertEqual(read(root/'papers/s1/status.json')['status'], 'complete')
+            cross = read(root/'papers/s1/crosscheck.json')
+            self.assertEqual([p['quote_verified'] for p in cross['checks'][0]['passages']], [True, False])
+            prompt = (root/'papers/s1/review_job/attempt_001/prompt.txt').read_text()
+            self.assertIn('CROSS-CHECK FINDINGS', prompt)
+            self.assertIn('"quote_verified": false', prompt)
+            report = (root/'report.md').read_text()
+            self.assertIn('UNVERIFIED', report)
+            before = list(root.rglob('attempt_*'))
+            execute(self.manifest, 'cc', self.root/'runs')
+            self.assertEqual(before, list(root.rglob('attempt_*')))
+        # earlier rubrics make no cross-check call
+        config['settings']['rubric'] = 'scientific-method-v1.1.1'
+        write(self.manifest, config)
+        with patch('scientific_review.provider.http', transport), patch('scientific_review.pipeline.call', side_effect=lambda *a, **k: call(*a, **k, transport=transport)):
+            root, errors = execute(self.manifest, 'noc', self.root/'runs')
+            self.assertFalse(errors)
+            self.assertFalse((root/'papers/s1/crosscheck.json').exists())
+            self.assertNotIn('CROSS-CHECK', (root/'papers/s1/review_job/attempt_001/prompt.txt').read_text())
+
+
 if __name__ == '__main__':
     unittest.main()

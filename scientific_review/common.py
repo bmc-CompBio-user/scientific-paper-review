@@ -9,11 +9,15 @@ import re
 import tempfile
 
 PACKAGE = Path(__file__).resolve().parent
-RUBRICS = ("scientific-method-v1.0.0", "scientific-method-v1.1.0", "scientific-method-v1.1.1")
+RUBRICS = ("scientific-method-v1.0.0", "scientific-method-v1.1.0", "scientific-method-v1.1.1", "scientific-method-v1.2.0")
 
 
 def version(settings):
     return settings["rubric"].rsplit("-", 1)[1]
+
+
+def has_crosscheck(settings):
+    return tuple(int(n) for n in version(settings)[1:].split(".")) >= (1, 2, 0)
 
 
 def stage_schema(stage, settings):

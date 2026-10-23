@@ -42,6 +42,8 @@ def source_schema(name, source_ids, settings=None):
                 if key == 'sources' and isinstance(value, dict):
                     value['items'] = {'type': 'string', 'enum': sorted(source_ids)}
                     value['maxItems'] = 8
+                elif key == 'source' and isinstance(value, dict) and value.get('type') == 'string':
+                    value['enum'] = sorted(source_ids)
                 else:
                     visit(value)
         elif isinstance(node, list):
@@ -74,6 +76,9 @@ def quality_flags(value, source_ids, stage):
                     for ref in item:
                         if ref not in source_ids:
                             flags.append({'kind': 'unknown_source', 'location': loc, 'source': ref})
+                elif key == 'source' and isinstance(item, str):
+                    if item not in source_ids:
+                        flags.append({'kind': 'unknown_source', 'location': loc, 'source': item})
                 else:
                     visit(item, loc)
         elif isinstance(node, list):

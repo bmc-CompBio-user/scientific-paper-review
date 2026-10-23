@@ -1,11 +1,12 @@
 import json
 import platform
+import re
 import sys
 from pathlib import Path
 import jsonschema
 import pymupdf
 from . import __version__
-from .common import PACKAGE, stage_prompt, digest, fingerprint, implementation_hash, lock, now, read, safe_id, write
+from .common import PACKAGE, has_crosscheck, stage_prompt, digest, fingerprint, implementation_hash, lock, now, read, safe_id, write
 from .config import load
 from .pdf import extract
 from .provider import call, identity
@@ -103,11 +104,41 @@ def page_prompt(page, sources, settings):
     return prompt
 
 
-def review_prompt(sources, settings, pages):
+def crosscheck_prompt(sources, settings):
+    text, omitted = select_blocks(sources['pages'], settings['crosscheck_text_chars'], lambda p: p['role_hint'] not in {'references_candidate', 'resources'})
+    coverage = {'omitted_blocks': omitted, 'images': 'No images are supplied to this stage.', 'warnings': sources['warnings']}
+    return (stage_prompt('crosscheck', settings) + '\n\nORIGINAL TEXT OF ALL SUPPLIED DOCUMENTS\n' + text +
+            '\n\nCONTEXT COVERAGE\n' + json.dumps(coverage, ensure_ascii=False)), omitted
+
+
+def compact(text):
+    """Quotes, dashes and whitespace differ between PDF extraction and model output; compare without them."""
+    return re.sub(r'[\s"\'`\u2018\u2019\u201c\u201d\u00b4]+', '', text).replace('\u2013', '-').replace('\u2014', '-').lower()
+
+
+def verify_quotes(result, sources):
+    """Check by code that every quote occurs verbatim (ignoring quotes, dashes and whitespace) in the cited text block."""
+    blocks = {b['id']: compact(b['text']) for p in sources['pages'] for b in p['blocks']}
+    checked = []
+    for check in result['checks']:
+        passages = []
+        for passage in check['passages']:
+            segments = [compact(s) for s in re.split(r'\.\.\.|\u2026', passage['quote'])]
+            segments = [s for s in segments if s]
+            block = blocks.get(passage['source'])
+            ok = bool(segments) and block is not None and all(s in block for s in segments)
+            passages.append({**passage, 'quote_verified': ok})
+        checked.append({**check, 'passages': passages})
+    return {**result, 'checks': checked}
+
+
+def review_prompt(sources, settings, pages, crosscheck=None):
     methods, omitted_methods = method_context(sources, settings)
     required = '\n\nPAGE EVIDENCE RECORDS (MODEL OUTPUTS, NOT GROUND TRUTH)\n' + json.dumps(pages, ensure_ascii=False)
     required += '\n\nCOMPLETE SOURCE INVENTORY (NOT ALL SOURCE CONTENT IS IN THIS PROMPT)\n' + json.dumps(inventory(sources), ensure_ascii=False)
     required += '\n\nORIGINAL METHODS CONTEXT\n' + methods
+    if crosscheck is not None:
+        required += '\n\nCROSS-CHECK FINDINGS (MODEL OUTPUT; quote_verified is set by code that searched the cited original block)\n' + json.dumps(crosscheck, ensure_ascii=False)
     if len(required) > settings['review_text_chars']:
         raise ValueError('Mandatory review context exceeds review_text_chars. No evidence silently dropped; use a new protocol with a larger context budget')
     original, omitted_original = select_blocks(sources['pages'], settings['review_text_chars']-len(required), lambda p: p['role_hint'] not in {'references_candidate', 'resources'})
@@ -138,6 +169,16 @@ def render_report(root):
                 claim['assessment'], '', claim['strength_rationale'], '', 'Causal scope: ' + claim['causal_scope'], '',
                 'Necessity: ' + claim['necessity'] + '; sufficiency: ' + claim['sufficiency'] + '.', '',
                 'Sources: ' + ', '.join(claim['sources']), ''])
+        cross_path = directory/'crosscheck.json'
+        if cross_path.exists():
+            cross = read(cross_path)
+            lines.extend(['### Cross-check of passages', '', 'Quotes are marked by code as found verbatim in the cited block (verified) or not (unverified).', ''])
+            for check in cross['checks']:
+                lines.extend([f"- [{check['relation']}] {check['category']}: {check['topic']}. {check['explanation']} Consequence: {check['consequence']}"] +
+                    [f"  - {'verified' if p['quote_verified'] else 'UNVERIFIED'} {p['source']}: {p['quote']}" for p in check['passages']] + [''])
+            if not cross['checks']:
+                lines.extend(['- No cross-passage findings reported.', ''])
+            lines.extend(['Not checked: ' + '; '.join(cross['not_checked']) if cross['not_checked'] else 'Not checked: nothing listed.', ''])
         for key in ('hypotheses', 'scientific_practice', 'claim_measurement_links', 'reporting_and_statistics', 'triangulation', 'validation_gaps'):
             if key not in review:
                 continue
@@ -211,7 +252,15 @@ def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_j
                         jobs += 1
                 if len(results) != len(sources['pages']):
                     continue
-                result = call(directory/'review_job', stage='review', prompt=review_prompt(sources, config['settings'], results),
+                crosscheck = None
+                if has_crosscheck(config['settings']):
+                    prompt, omitted = crosscheck_prompt(sources, config['settings'])
+                    found = call(directory/'crosscheck_job', stage='crosscheck', prompt=prompt, images=[], source_ids=source_ids(sources),
+                        settings=config['settings'], retry_failed=retry_failed)
+                    crosscheck = verify_quotes(found, sources)
+                    write(directory/'crosscheck.json', crosscheck)
+                    write(directory/'crosscheck_coverage.json', {'omitted_blocks': omitted})
+                result = call(directory/'review_job', stage='review', prompt=review_prompt(sources, config['settings'], results, crosscheck),
                     images=[], source_ids=source_ids(sources), settings=config['settings'], retry_failed=retry_failed)
                 write(directory/'review.json', result)
                 write(directory/'status.json', {'status': 'complete', 'ended': now(), 'pages': len(results), 'scientific_accuracy': 'unverified'})

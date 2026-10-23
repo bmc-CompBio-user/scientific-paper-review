@@ -73,6 +73,16 @@
         },
         "rubric": {
           "type": "string"
+        },
+        "crosscheck_num_predict": {
+          "type": "integer",
+          "minimum": 512,
+          "maximum": 32768
+        },
+        "crosscheck_text_chars": {
+          "type": "integer",
+          "minimum": 20000,
+          "maximum": 600000
         }
       }
     },

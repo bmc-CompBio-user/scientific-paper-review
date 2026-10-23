@@ -6,7 +6,7 @@ from .common import PACKAGE, RUBRICS, read, safe_id
 DEFAULTS = {
     "model": "qwen3.5:122b-a10b", "host": "http://127.0.0.1:11434", "think": False,
     "temperature": 0, "seed": 42, "num_ctx": 65536, "page_num_predict": 2600,
-    "review_num_predict": 10000, "dpi": 240, "tiles": True, "timeout_seconds": 1800,
+    "review_num_predict": 10000, "crosscheck_num_predict": 8000, "crosscheck_text_chars": 300000, "dpi": 240, "tiles": True, "timeout_seconds": 1800,
     "page_text_chars": 18000, "method_text_chars": 24000,
     "review_text_chars": 110000, "method_blocks_per_page": 6,
     "rubric": "scientific-method-v1.0.0"
