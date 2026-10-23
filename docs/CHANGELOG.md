@@ -1,5 +1,9 @@
 # Changes
 
+## Rubric 1.1.0 (opt-in)
+
+Select with `"rubric": "scientific-method-v1.1.0"` in manifest settings; the default stays 1.0.0 and its prompts and schemas are unchanged. Adds two rubric dimensions: claim-measurement linkage (what each assay measures versus what the claim is about; link status directly shown, inferred, not shown or unclear) and reporting and statistics (experimental units, replication, error bars, tests, multiplicity, significance wording, software parameters, data availability, consistency between Methods, legends and Results). Page records gain `measurement_target` and `statistics_reported`; the review gains `claim_measurement_links` and `reporting_and_statistics`. Prompts and schemas are selected by rubric version. The implementation fingerprint changed, so earlier run IDs cannot be resumed; use a new run ID. Consider `review_num_predict` of about 14000 because the review output is longer. Eighteen offline tests pass.
+
 ## 1.0.3
 
 Bound previously unbounded review-output lists to eight items. This prevents runaway repetition inside fields such as triangulation evidence streams. Existing limits are preserved; the page-analysis format and scientific prompts are unchanged.

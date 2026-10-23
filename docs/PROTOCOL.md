@@ -31,3 +31,7 @@ Transport, truncation, JSON parsing and structural schema failures are operation
 Unknown/empty citations and inconsistent claim links are quality flags, not automatic paper failure. Scientific mistakes are assessed by humans against the original pages, legends and methods. The primary endpoint is recurring material reasoning errors across independent studies, including false criticism and missed validation. Correct reasoning and justified restraint should also be recorded by evaluators.
 
 Temperature zero and a fixed seed do not establish scientific reliability or exact determinism. Record human review, model identity, protocol identity and input package when comparing runs. The production v1 rubric contains no named-paper answer key.
+
+## Protocol v1.1.0
+
+An opt-in rubric (`scientific-method-v1.1.0`) adds claim-measurement linkage and reporting-and-statistics review. It is a separate protocol: analyze its runs as a different cohort or as a paired comparison with v1.0.0, and keep v1.0.0 results. It was motivated by a first expert comparison (see `compare.md`); the added items are generic and contain no study-specific answers.

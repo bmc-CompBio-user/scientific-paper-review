@@ -5,7 +5,7 @@ from pathlib import Path
 import jsonschema
 import pymupdf
 from . import __version__
-from .common import PACKAGE, digest, fingerprint, implementation_hash, lock, now, read, safe_id, write
+from .common import PACKAGE, stage_prompt, digest, fingerprint, implementation_hash, lock, now, read, safe_id, write
 from .config import load
 from .pdf import extract
 from .provider import call, identity
@@ -99,7 +99,7 @@ def page_prompt(page, sources, settings):
                 'omitted_target_text_blocks': omitted, 'omitted_method_blocks': omitted_methods,
                 'omitted_related_caption_blocks': omitted_captions,
                 'caption_link_status': ('unlinked legend candidates because no figure number was extracted; inspect the images to assess relevance' if all_captions else 'label-matched candidates with possible continuation blocks; human verification required')}
-    prompt = (PACKAGE/'prompts/page-v1.0.0.md').read_text() + '\n\nSOURCE MAP\n' + json.dumps(evidence, ensure_ascii=False) + '\n\nTARGET ORIGINAL TEXT\n' + text + '\n\nORIGINAL METHODS CONTEXT\n' + methods + '\n\nRELATED ORIGINAL CAPTION CANDIDATES\n' + captions
+    prompt = stage_prompt('page', settings) + '\n\nSOURCE MAP\n' + json.dumps(evidence, ensure_ascii=False) + '\n\nTARGET ORIGINAL TEXT\n' + text + '\n\nORIGINAL METHODS CONTEXT\n' + methods + '\n\nRELATED ORIGINAL CAPTION CANDIDATES\n' + captions
     return prompt
 
 
@@ -111,7 +111,7 @@ def review_prompt(sources, settings, pages):
     if len(required) > settings['review_text_chars']:
         raise ValueError('Mandatory review context exceeds review_text_chars. No evidence silently dropped; use a new protocol with a larger context budget')
     original, omitted_original = select_blocks(sources['pages'], settings['review_text_chars']-len(required), lambda p: p['role_hint'] not in {'references_candidate', 'resources'})
-    return (PACKAGE/'prompts/review-v1.0.0.md').read_text() + required + '\n\nADDITIONAL ORIGINAL TEXT\n' + original + '\n\nCONTEXT COVERAGE\n' + json.dumps({'omitted_method_blocks': omitted_methods,
+    return stage_prompt('review', settings) + required + '\n\nADDITIONAL ORIGINAL TEXT\n' + original + '\n\nCONTEXT COVERAGE\n' + json.dumps({'omitted_method_blocks': omitted_methods,
         'original_text_blocks_not_repeated_in_additional_context': omitted_original,
         'images': 'Images were inspected in page stages. No images are attached to this synthesis; page assessments can be wrong.',
         'warnings': sources['warnings']}, ensure_ascii=False)
@@ -138,7 +138,9 @@ def render_report(root):
                 claim['assessment'], '', claim['strength_rationale'], '', 'Causal scope: ' + claim['causal_scope'], '',
                 'Necessity: ' + claim['necessity'] + '; sufficiency: ' + claim['sufficiency'] + '.', '',
                 'Sources: ' + ', '.join(claim['sources']), ''])
-        for key in ('hypotheses', 'scientific_practice', 'triangulation', 'validation_gaps'):
+        for key in ('hypotheses', 'scientific_practice', 'claim_measurement_links', 'reporting_and_statistics', 'triangulation', 'validation_gaps'):
+            if key not in review:
+                continue
             lines.extend(['### ' + key.replace('_', ' ').title(), ''])
             for item in review[key]:
                 lines.extend(['- ' + '; '.join(f'{k}: {json.dumps(v, ensure_ascii=False) if isinstance(v, list) else v}' for k, v in item.items()), ''])

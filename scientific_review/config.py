@@ -1,7 +1,7 @@
 from pathlib import Path
 from urllib.parse import urlparse
 import jsonschema
-from .common import PACKAGE, read, safe_id
+from .common import PACKAGE, RUBRICS, read, safe_id
 
 DEFAULTS = {
     "model": "qwen3.5:122b-a10b", "host": "http://127.0.0.1:11434", "think": False,
@@ -44,6 +44,6 @@ def load(path):
             documents.append({**doc, "path": str(pdf)})
         item["documents"] = documents
         papers.append(item)
-    if settings["rubric"] != DEFAULTS["rubric"]:
+    if settings["rubric"] not in RUBRICS:
         raise ValueError("Unknown rubric version")
     return {"manifest_path": str(path), "settings": settings, "papers": papers}

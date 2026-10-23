@@ -6,7 +6,7 @@ import time
 import urllib.error
 import urllib.request
 import jsonschema
-from .common import PACKAGE, digest, now, read, write, fingerprint
+from .common import PACKAGE, stage_schema, digest, now, read, write, fingerprint
 from .reuse import verify_reuse
 
 
@@ -32,8 +32,8 @@ def identity(settings):
     return {'ollama': http(settings['host'], '/api/version'), 'model': matches[0]}
 
 
-def source_schema(name, source_ids):
-    schema = copy.deepcopy(read(PACKAGE / 'schemas' / (name + '.json')))
+def source_schema(name, source_ids, settings=None):
+    schema = copy.deepcopy(read(stage_schema(name, settings or {"rubric": "scientific-method-v1.0.0"})))
     def visit(node):
         if isinstance(node, dict):
             if name == 'review' and node.get('type') == 'array':
@@ -82,11 +82,11 @@ def quality_flags(value, source_ids, stage):
 
 def call(folder, *, stage, prompt, images, source_ids, settings, retry_failed=False, transport=http):
     folder.mkdir(parents=True, exist_ok=True)
-    schema = source_schema(stage, source_ids)
+    schema = source_schema(stage, source_ids, settings)
     # Structural validation is separate from citation consistency warnings.
-    basic_schema = read(PACKAGE / 'schemas' / (stage + '.json'))
+    basic_schema = read(stage_schema(stage, settings))
     payload = {'model': settings['model'], 'stream': False, 'think': False, 'format': schema,
-        'messages': [{'role': 'system', 'content': (PACKAGE / 'prompts/scientific-method-v1.0.0.md').read_text()},
+        'messages': [{'role': 'system', 'content': (PACKAGE / 'prompts' / (settings['rubric'] + '.md')).read_text()},
                      {'role': 'user', 'content': prompt}],
         'options': {'temperature': settings['temperature'], 'seed': settings['seed'],
                     'num_ctx': settings['num_ctx'], 'num_predict': settings[stage + '_num_predict']}}

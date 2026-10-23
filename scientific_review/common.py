@@ -9,6 +9,21 @@ import re
 import tempfile
 
 PACKAGE = Path(__file__).resolve().parent
+RUBRICS = ("scientific-method-v1.0.0", "scientific-method-v1.1.0")
+
+
+def version(settings):
+    return settings["rubric"].rsplit("-", 1)[1]
+
+
+def stage_schema(stage, settings):
+    """Versioned schema when the rubric has one, else the original schema."""
+    versioned = PACKAGE / "schemas" / f"{stage}-{version(settings)}.json"
+    return versioned if versioned.exists() else PACKAGE / "schemas" / f"{stage}.json"
+
+
+def stage_prompt(stage, settings):
+    return (PACKAGE / "prompts" / f"{stage}-{version(settings)}.md").read_text()
 
 
 def now():

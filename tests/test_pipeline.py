@@ -274,5 +274,23 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(any(f['kind'] == 'unknown_claim_link' for f in quality_flags(value, set(), 'review')))
 
 
+    def test_rubric_v110_schemas_and_prompts(self):
+        from scientific_review.common import stage_prompt, stage_schema
+        settings = {'rubric': 'scientific-method-v1.1.0'}
+        review = source_schema('review', {'main.p001.b000'}, settings)
+        for key in ('claim_measurement_links', 'reporting_and_statistics'):
+            self.assertIn(key, review['required'])
+            self.assertEqual(review['properties'][key]['items']['properties']['sources']['items']['enum'], ['main.p001.b000'])
+        page = source_schema('page', {'main.p001.b000'}, settings)['properties']['observations']['items']
+        self.assertIn('statistics_reported', page['required'])
+        self.assertIn('measurement_target', page['required'])
+        self.assertIn('Reporting and statistics', (PACKAGE/'prompts/scientific-method-v1.1.0.md').read_text())
+        self.assertIn('claim_measurement_links', stage_prompt('review', settings))
+        # v1.0.0 stays untouched
+        old = {'rubric': 'scientific-method-v1.0.0'}
+        self.assertEqual(stage_schema('review', old).name, 'review.json')
+        self.assertNotIn('reporting_and_statistics', read(stage_schema('review', old))['properties'])
+
+
 if __name__ == '__main__':
     unittest.main()
