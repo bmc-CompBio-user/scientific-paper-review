@@ -3,6 +3,7 @@
 /*
 !/.gitignore
 !/README.md
+!/compare.md
 !/pyproject.toml
 !/requirements.lock
 !/scientific_review/
