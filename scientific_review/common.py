@@ -9,7 +9,7 @@ import re
 import tempfile
 
 PACKAGE = Path(__file__).resolve().parent
-RUBRICS = ("scientific-method-v1.0.0", "scientific-method-v1.1.0")
+RUBRICS = ("scientific-method-v1.0.0", "scientific-method-v1.1.0", "scientific-method-v1.1.1")
 
 
 def version(settings):

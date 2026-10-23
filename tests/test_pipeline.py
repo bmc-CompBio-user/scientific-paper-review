@@ -292,5 +292,21 @@ class PipelineTests(unittest.TestCase):
         self.assertNotIn('reporting_and_statistics', read(stage_schema('review', old))['properties'])
 
 
+    def test_truncated_text_flag_and_v111_rules(self):
+        from scientific_review.provider import looks_truncated
+        self.assertTrue(looks_truncated('Methods state '))
+        self.assertTrue(looks_truncated('The use of the'))
+        self.assertFalse(looks_truncated('not stated'))
+        self.assertFalse(looks_truncated('The design is adequate.'))
+        value = review_value()
+        value['context_limitations'] = ['The text uses terms like ']
+        self.assertTrue(any(f['kind'] == 'suspected_truncated_text' for f in quality_flags(value, set(), 'review')))
+        from scientific_review.common import stage_prompt, stage_schema
+        settings = {'rubric': 'scientific-method-v1.1.1'}
+        self.assertIn('double quotation', (PACKAGE/'prompts/scientific-method-v1.1.1.md').read_text())
+        self.assertIn('double quotation', stage_prompt('page', settings))
+        self.assertEqual(stage_schema('review', settings).name, 'review-v1.1.1.json')
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -51,6 +51,17 @@ def source_schema(name, source_ids, settings=None):
     return schema
 
 
+TRAILING_WORDS = {'a', 'an', 'the', 'of', 'to', 'in', 'on', 'for', 'by', 'with', 'as', 'at', 'from', 'that', 'which', 'and', 'or', 'but', 'than', 'like'}
+
+
+def looks_truncated(text):
+    """A text value that stops mid-sentence, as when an unescaped quote ends a constrained-decoding string."""
+    stripped = text.rstrip()
+    if not stripped:
+        return False
+    return text != stripped or stripped[-1] in '(:,;' or stripped.split()[-1].lower() in TRAILING_WORDS
+
+
 def quality_flags(value, source_ids, stage):
     flags = []
     def visit(node, location='$'):
@@ -68,6 +79,8 @@ def quality_flags(value, source_ids, stage):
         elif isinstance(node, list):
             for index, item in enumerate(node):
                 visit(item, f'{location}[{index}]')
+        elif isinstance(node, str) and looks_truncated(node):
+            flags.append({'kind': 'suspected_truncated_text', 'location': location, 'ends_with': node[-40:]})
     visit(value)
     if stage == 'review':
         ids = [c['id'] for c in value['major_claims']]

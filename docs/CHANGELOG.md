@@ -1,5 +1,9 @@
 # Changes
 
+## Rubric 1.1.1 (opt-in)
+
+Fixes truncated text fields. When the model opened a quotation inside a text value, constrained JSON decoding ended the string at the quotation mark and the rest of the sentence was lost (first seen with rubric 1.1.0; the same pattern appears in earlier runs). Rubric 1.1.1 is 1.1.0 plus an output rule against double quotation marks in text values. All rubrics now also raise the quality flag `suspected_truncated_text` for values that end mid-sentence (trailing whitespace, trailing punctuation such as an opening bracket, colon, comma or semicolon, or a trailing function word). The flag is advisory, not a failure. Runs made with 1.1.0 keep their results and are affected by the defect. Select with `"rubric": "scientific-method-v1.1.1"`; use a new run ID.
+
 ## Rubric 1.1.0 (opt-in)
 
 Select with `"rubric": "scientific-method-v1.1.0"` in manifest settings; the default stays 1.0.0 and its prompts and schemas are unchanged. Adds two rubric dimensions: claim-measurement linkage (what each assay measures versus what the claim is about; link status directly shown, inferred, not shown or unclear) and reporting and statistics (experimental units, replication, error bars, tests, multiplicity, significance wording, software parameters, data availability, consistency between Methods, legends and Results). Page records gain `measurement_target` and `statistics_reported`; the review gains `claim_measurement_links` and `reporting_and_statistics`. Prompts and schemas are selected by rubric version. The implementation fingerprint changed, so earlier run IDs cannot be resumed; use a new run ID. Consider `review_num_predict` of about 14000 because the review output is longer. Eighteen offline tests pass.
