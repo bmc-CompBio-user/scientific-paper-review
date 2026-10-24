@@ -378,5 +378,13 @@ class PipelineTests(unittest.TestCase):
             self.assertNotIn('CROSS-CHECK', (root/'papers/s1/review_job/attempt_001/prompt.txt').read_text())
 
 
+    def test_caption_pattern_accepts_common_journal_styles(self):
+        from scientific_review.pdf import CAPTION
+        for text in ('Figure 1. Legend', 'Fig. 2: Legend', 'Fig. 3 | Legend', 'Figure S4 \u2014 Legend', 'Fig. 5 \u2013 Legend'):
+            self.assertTrue(CAPTION.match(text), text)
+        for text in ('Figure 1 shows', 'see Fig. 2 | x', 'Figure legends'):
+            self.assertFalse(CAPTION.match(text), text)
+
+
 if __name__ == '__main__':
     unittest.main()

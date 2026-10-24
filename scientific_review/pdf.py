@@ -5,7 +5,7 @@ import pymupdf
 from .common import digest, read, write
 
 FIGURE = re.compile(r"\b(?:Figures?|Figs?\.)\s+(S?\d+)(?:[A-H])?", re.I)
-CAPTION = re.compile(r"^\s*(?:Figure|Fig\.)\s+(S?\d+)\s*[.:]", re.I)
+CAPTION = re.compile(r"^\s*(?:Figure|Fig\.)\s+(S?\d+)\s*[.:|\u2013\u2014]", re.I)
 
 
 def role(text, index):
