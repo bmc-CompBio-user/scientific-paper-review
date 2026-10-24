@@ -4,6 +4,7 @@
 !/.gitignore
 !/README.md
 !/compare.md
+!/priorities.md
 !/pyproject.toml
 !/requirements.lock
 !/scientific_review/
