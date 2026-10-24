@@ -117,19 +117,42 @@ def compact(text):
 
 
 def verify_quotes(result, sources):
-    """Check by code that every quote occurs verbatim (ignoring quotes, dashes and whitespace) in the cited text block."""
-    blocks = {b['id']: compact(b['text']) for p in sources['pages'] for b in p['blocks']}
-    checked = []
-    for check in result['checks']:
-        passages = []
-        for passage in check['passages']:
-            segments = [compact(s) for s in re.split(r'\.\.\.|\u2026', passage['quote'])]
-            segments = [s for s in segments if s]
-            block = blocks.get(passage['source'])
-            ok = bool(segments) and block is not None and all(s in block for s in segments)
-            passages.append({**passage, 'quote_verified': ok})
-        checked.append({**check, 'passages': passages})
-    return {**result, 'checks': checked}
+    """Check by code that every quote occurs verbatim (ignoring quotes, dashes and whitespace) in the cited document.
+
+    Source blocks are often single lines, so a sentence can span consecutive blocks or a page break. A quote counts as verified when
+    all its segments are found in the document text and at least one overlaps the cited block."""
+    pages, documents = {}, {}
+    for page in sources['pages']:
+        documents.setdefault(page['document'], []).append(page)
+    for pages_of_document in documents.values():
+        text, spans = '', {}
+        for page in pages_of_document:
+            for block in page['blocks']:
+                if re.fullmatch(r'\s*\d{1,4}\s*', block['text']):
+                    continue  # bare page number between pages
+                piece = compact(block['text'])
+                spans[block['id']] = (len(text), len(text) + len(piece))
+                text += piece
+        for block_id in spans:
+            pages[block_id] = (text, spans)
+    def verified(passage):
+        segments = [s for s in (compact(part) for part in re.split(r'\.\.\.|\u2026', passage['quote'])) if s]
+        if not segments or passage['source'] not in pages:
+            return False
+        text, spans = pages[passage['source']]
+        start, end = spans[passage['source']]
+        overlaps = False
+        for segment in segments:
+            found = False
+            at = text.find(segment)
+            while at >= 0:
+                found = True
+                overlaps = overlaps or (at < end and at + len(segment) > start)
+                at = text.find(segment, at + 1)
+            if not found:
+                return False
+        return overlaps
+    return {**result, 'checks': [{**check, 'passages': [{**p, 'quote_verified': verified(p)} for p in check['passages']]} for check in result['checks']]}
 
 
 def review_prompt(sources, settings, pages, crosscheck=None):

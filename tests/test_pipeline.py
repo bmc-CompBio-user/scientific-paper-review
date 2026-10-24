@@ -310,7 +310,7 @@ class PipelineTests(unittest.TestCase):
 
     def test_crosscheck_quote_verification_and_schema(self):
         from scientific_review.pipeline import verify_quotes
-        sources = {'pages': [{'blocks': [{'id': 'main.p001.b000', 'text': 'Cells were treated with 500 ng\nRNA ("single") for 24 h; FDR < 0.1 was used.'}]}]}
+        sources = {'pages': [{'document': 'main', 'blocks': [{'id': 'main.p001.b000', 'text': 'Cells were treated with 500 ng\nRNA ("single") for 24 h; FDR < 0.1 was used.'}]}]}
         passage = lambda source, quote: {'source': source, 'quote': quote}
         result = {'checks': [{'passages': [passage('main.p001.b000', "treated with 500 ng RNA (single) for 24 h"),
                                            passage('main.p001.b000', 'Cells were ... FDR < 0.1'),
@@ -319,6 +319,14 @@ class PipelineTests(unittest.TestCase):
                                            passage('main.p001.b000', '')]}]}
         verified = [p['quote_verified'] for p in verify_quotes(result, sources)['checks'][0]['passages']]
         self.assertEqual(verified, [True, True, False, False, False])
+        lines = {'pages': [{'document': 'main', 'blocks': [{'id': 'main.p001.b000', 'text': 'was diluted into tris-'}, {'id': 'main.p001.b001', 'text': 'buffered saline (TBS). Equal amounts'},
+                                       {'id': 'main.p001.b002', 'text': 'were blotted. After'}, {'id': 'main.p001.b003', 'text': '15'}]}, {'document': 'main', 'blocks': [{'id': 'main.p002.b000', 'text': 'isolation of RNA. Equal amounts elsewhere.'}]}]}
+        spans = {'checks': [{'passages': [passage('main.p001.b001', 'diluted into tris-buffered saline (TBS)'),
+                                          passage('main.p001.b002', 'Equal amounts were blotted'),
+                                          passage('main.p001.b000', 'Equal amounts were blotted'),
+                                          passage('main.p002.b000', 'Equal amounts were blotted'),
+                                          passage('main.p002.b000', 'blotted. After isolation of RNA')]}]}
+        self.assertEqual([p['quote_verified'] for p in verify_quotes(spans, lines)['checks'][0]['passages']], [True, True, False, False, True])
         schema = source_schema('crosscheck', {'main.p001.b000'}, {'rubric': 'scientific-method-v1.2.0'})
         self.assertEqual(schema['properties']['checks']['items']['properties']['passages']['items']['properties']['source']['enum'], ['main.p001.b000'])
         value = blank(schema)
