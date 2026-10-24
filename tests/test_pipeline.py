@@ -327,6 +327,9 @@ class PipelineTests(unittest.TestCase):
                                           passage('main.p002.b000', 'Equal amounts were blotted'),
                                           passage('main.p002.b000', 'blotted. After isolation of RNA')]}]}
         self.assertEqual([p['quote_verified'] for p in verify_quotes(spans, lines)['checks'][0]['passages']], [True, True, False, False, True])
+        numbered = {'pages': [{'document': 'main', 'blocks': [{'id': 'main.p001.b000', 'text': 'cells were exposed to 10 nM DHT for \n305'}, {'id': 'main.p001.b001', 'text': '4 hrs. Mono-nucleosomes \n306'}]}]}
+        line_numbers = {'checks': [{'passages': [passage('main.p001.b000', 'exposed to 10 nM DHT for 4 hrs')]}]}
+        self.assertTrue(verify_quotes(line_numbers, numbered)['checks'][0]['passages'][0]['quote_verified'])
         schema = source_schema('crosscheck', {'main.p001.b000'}, {'rubric': 'scientific-method-v1.2.0'})
         self.assertEqual(schema['properties']['checks']['items']['properties']['passages']['items']['properties']['source']['enum'], ['main.p001.b000'])
         value = blank(schema)

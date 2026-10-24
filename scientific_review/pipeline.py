@@ -130,7 +130,7 @@ def verify_quotes(result, sources):
             for block in page['blocks']:
                 if re.fullmatch(r'\s*\d{1,4}\s*', block['text']):
                     continue  # bare page number between pages
-                piece = compact(block['text'])
+                piece = compact(re.sub(r'\n\s*\d{1,4}\s*$', '', block['text']))  # manuscript line number at the end of the line
                 spans[block['id']] = (len(text), len(text) + len(piece))
                 text += piece
         for block_id in spans:
