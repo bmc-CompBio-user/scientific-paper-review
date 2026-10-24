@@ -381,6 +381,22 @@ class PipelineTests(unittest.TestCase):
             self.assertNotIn('CROSS-CHECK', (root/'papers/s1/review_job/attempt_001/prompt.txt').read_text())
 
 
+    def test_rubric_v130_adds_inference_design_and_negative_evidence(self):
+        from scientific_review.common import stage_prompt, stage_schema, has_crosscheck
+        settings = {'rubric': 'scientific-method-v1.3.0'}
+        self.assertTrue(has_crosscheck(settings))
+        rubric = stage_prompt('scientific-method', settings)
+        self.assertIn('1.3.0', rubric)
+        self.assertIn('11. Inference design and analysis fit', rubric)
+        self.assertIn('12. Negative and absence evidence', rubric)
+        self.assertIn('10. Cross-passage consistency', rubric)
+        aspects = read(stage_schema('review', settings))['properties']['reporting_and_statistics']['items']['properties']['aspect']['enum']
+        for aspect in ('unit_of_inference', 'scale_and_model', 'batch_and_metadata', 'negative_evidence'):
+            self.assertIn(aspect, aspects)
+        old = read(stage_schema('review', {'rubric': 'scientific-method-v1.2.0'}))['properties']['reporting_and_statistics']['items']['properties']['aspect']['enum']
+        self.assertNotIn('unit_of_inference', old)
+        self.assertIn('leave the check out', stage_prompt('crosscheck', settings))
+
     def test_caption_pattern_accepts_common_journal_styles(self):
         from scientific_review.pdf import CAPTION
         for text in ('Figure 1. Legend', 'Fig. 2: Legend', 'Fig. 3 | Legend', 'Figure S4 \u2014 Legend', 'Fig. 5 \u2013 Legend'):

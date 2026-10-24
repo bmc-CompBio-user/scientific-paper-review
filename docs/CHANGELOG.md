@@ -1,5 +1,13 @@
 # Changes
 
+## Rubric 1.3.0 (opt-in)
+
+Adds two rubric dimensions derived from `priorities.md`: inference design and analysis fit (unit of inference versus lower-level observations, scale and model fit, hand-set thresholds, treatment-batch confounding, exploratory versus confirmatory) and negative and absence evidence (detection sensitivity, positive controls, no claim above moderate on non-detection alone). The review's `reporting_and_statistics` accepts up to ten findings and four new aspects (`unit_of_inference`, `scale_and_model`, `batch_and_metadata`, `negative_evidence`). The page prompt asks for the detection limit of negative observations. The cross-check prompt now says to omit checks whose passages agree and to keep reasoning out of the fields, after cross-check items labelled as conflicts were seen with the explanation 'no conflict found' and with visible self-correction. Otherwise identical to 1.2.0. Select with `"rubric": "scientific-method-v1.3.0"`; use a new run ID. Not yet evaluated across independent studies; see the comparison register.
+
+## Rubric 1.2.0 (opt-in)
+
+Adds a cross-check stage before the review: a text-only call compares passages of the original text for conflicts in thresholds, sample sizes, amounts and durations, tests and software, generalising statements and wording (dimension 10). Quotes are verified by code against the cited block, across neighbouring blocks and page breaks, ignoring bare page numbers and manuscript line numbers at line ends. Results are in `crosscheck.json` and are passed to the review. New settings `crosscheck_num_predict` and `crosscheck_text_chars`. Legend detection also accepts `Fig. 1 | text` and dash styles. Select with `"rubric": "scientific-method-v1.2.0"`; use a new run ID.
+
 ## Rubric 1.1.1 (opt-in)
 
 Fixes truncated text fields. When the model opened a quotation inside a text value, constrained JSON decoding ended the string at the quotation mark and the rest of the sentence was lost (first seen with rubric 1.1.0; the same pattern appears in earlier runs). Rubric 1.1.1 is 1.1.0 plus an output rule against double quotation marks in text values. All rubrics now also raise the quality flag `suspected_truncated_text` for values that end mid-sentence (trailing whitespace, trailing punctuation such as an opening bracket, colon, comma or semicolon, or a trailing function word). The flag is advisory, not a failure. Runs made with 1.1.0 keep their results and are affected by the defect. Select with `"rubric": "scientific-method-v1.1.1"`; use a new run ID.

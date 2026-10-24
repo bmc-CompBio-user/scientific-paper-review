@@ -35,3 +35,8 @@ Temperature zero and a fixed seed do not establish scientific reliability or exa
 ## Protocol v1.1.0
 
 An opt-in rubric (`scientific-method-v1.1.0`) adds claim-measurement linkage and reporting-and-statistics review. It is a separate protocol: analyze its runs as a different cohort or as a paired comparison with v1.0.0, and keep v1.0.0 results. It was motivated by a first expert comparison (see `compare.md`); the added items are generic and contain no study-specific answers.
+
+
+## Protocols v1.2.0 and v1.3.0
+
+`scientific-method-v1.2.0` adds a cross-passage consistency check (a text-only stage whose quotes are verified by code). `scientific-method-v1.3.0` adds inference design and analysis fit, and negative and absence evidence, derived from `priorities.md`. Both are opt-in, separate protocols. They were motivated by expert comparisons across six manuscripts that are kept in a private register; the added items are generic and contain no study-specific answers. Because the same manuscripts motivated the change, they cannot also serve as its evaluation: judge v1.3.0 on manuscripts that were not used to write it, and count a finding only when it recurs across independent studies.
