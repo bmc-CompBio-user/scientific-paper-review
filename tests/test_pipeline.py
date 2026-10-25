@@ -415,6 +415,49 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual([c['declared_consistent'] for c in checked['checks']], [True, False])
         self.assertEqual([c['explanation'] for c in reported_checks(checked)], ['Four versus six.'])
 
+    def test_rubric_v140_builds_experiment_inventory_before_review(self):
+        import re
+        def transport(host, route, payload=None, timeout=30):
+            if route == '/api/tags':
+                return {'models': [{'name': DEFAULTS['model'], 'digest': 'synthetic-digest'}]}
+            if route == '/api/version':
+                return {'version': 'synthetic'}
+            value = blank(payload['format'])
+            content = payload['messages'][1]['content']
+            if 'page_id' in value:
+                value['page_id'] = 'main.p001' if '"target_page": "main.p001"' in content else 'main.p002'
+            if 'experiments' in value:
+                block = re.search(r'\[(main\.p\d+\.b\d+)\] [^\[]*?Three independent cultures per group', content)[1]
+                entry = blank(payload['format']['properties']['experiments']['items'])
+                entry.update(id='E1', label='Fig 1', replicate_unit='independent_biological', hypothesis_timing='unclear',
+                             evidence=[{'source': block, 'quote': 'Three independent cultures per group', 'supports': 'N'},
+                                       {'source': block, 'quote': 'Nine invented cultures per group', 'supports': 'N'}])
+                value['experiments'] = [entry]
+            return {'done': True, 'done_reason': 'stop', 'message': {'content': json.dumps(value)}}
+        config = read(self.manifest)
+        config['settings']['rubric'] = 'scientific-method-v1.4.0'
+        write(self.manifest, config)
+        with patch('scientific_review.provider.http', transport), patch('scientific_review.pipeline.call', side_effect=lambda *a, **k: call(*a, **k, transport=transport)):
+            root, errors = execute(self.manifest, 'inv', self.root/'runs')
+            self.assertFalse(errors)
+            self.assertEqual(read(root/'papers/s1/status.json')['status'], 'complete')
+            inventory = read(root/'papers/s1/experiments.json')
+            self.assertEqual([q['quote_verified'] for q in inventory['experiments'][0]['evidence']], [True, False])
+            prompt = (root/'papers/s1/review_job/attempt_001/prompt.txt').read_text()
+            self.assertIn('EXPERIMENT INVENTORY', prompt)
+            self.assertIn('"quote_verified": false', prompt)
+            self.assertIn('Experiment inventory', (root/'report.md').read_text())
+            before = list(root.rglob('attempt_*'))
+            execute(self.manifest, 'inv', self.root/'runs')
+            self.assertEqual(before, list(root.rglob('attempt_*')))
+        config['settings']['rubric'] = 'scientific-method-v1.3.0'
+        write(self.manifest, config)
+        with patch('scientific_review.provider.http', transport), patch('scientific_review.pipeline.call', side_effect=lambda *a, **k: call(*a, **k, transport=transport)):
+            root, errors = execute(self.manifest, 'noinv', self.root/'runs')
+            self.assertFalse(errors)
+            self.assertFalse((root/'papers/s1/experiments.json').exists())
+            self.assertNotIn('EXPERIMENT INVENTORY', (root/'papers/s1/review_job/attempt_001/prompt.txt').read_text())
+
     def test_caption_pattern_accepts_common_journal_styles(self):
         from scientific_review.pdf import CAPTION
         for text in ('Figure 1. Legend', 'Fig. 2: Legend', 'Fig. 3 | Legend', 'Figure S4 \u2014 Legend', 'Fig. 5 \u2013 Legend'):

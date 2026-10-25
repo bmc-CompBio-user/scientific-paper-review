@@ -1,5 +1,9 @@
 # Changes
 
+## Rubric 1.4.0 (prototype, opt-in)
+
+Adds an experiment-inventory stage between the cross-check and the review. A text-only call over the original text lists up to 40 individual experiments with the question or hypothesis and its stated timing, the endpoint and measurement principle, groups and conditions, replicate unit and reported N, representativity (example versus quantified, stated repeats), the controls mentioned and the alternative each addresses, expected controls not mentioned in the supplied text, the statistics and the unit treated as N, and information not stated. Evidence quotes are checked by code against the cited page (`quote_verified`). The inventory is written to `experiments.json`, shown in the report, and passed to the review, which rates claims against the experiments that serve them. Otherwise identical to 1.3.0. New settings `experiments_num_predict` and `experiments_text_chars`. Quote checking also ignores trailing punctuation and, for the inventory, accepts a quote anywhere on the cited block's page. Prototype status: evaluated only by inspecting inventories on cases already reviewed; no end-to-end comparison yet.
+
 ## Cross-check post-processing (rubrics 1.2.0 and later)
 
 Cross-check items whose own explanation says the passages agree (for example 'No conflict found' or 'Consistent', or a consequence starting with 'None') are marked `declared_consistent` in `crosscheck.json`, kept there, and left out of the review prompt and the report except for a count. This is a deterministic text rule and does not depend on the prompt, which did not remove the mislabelling in two further cases. Explanations containing 'however', 'but', 'although', 'whereas' or 'mismatch' are never set aside. The implementation fingerprint changed; use new run IDs. Earlier runs keep their reports.

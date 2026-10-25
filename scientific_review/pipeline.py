@@ -6,7 +6,7 @@ from pathlib import Path
 import jsonschema
 import pymupdf
 from . import __version__
-from .common import PACKAGE, has_crosscheck, stage_prompt, digest, fingerprint, implementation_hash, lock, now, read, safe_id, write
+from .common import PACKAGE, has_crosscheck, has_inventory, stage_prompt, digest, fingerprint, implementation_hash, lock, now, read, safe_id, write
 from .config import load
 from .pdf import extract
 from .provider import call, identity
@@ -131,31 +131,36 @@ def reported_checks(crosscheck):
     return [c for c in crosscheck['checks'] if not c.get('declared_consistent')]
 
 
-def verify_quotes(result, sources):
-    """Check by code that every quote occurs verbatim (ignoring quotes, dashes and whitespace) in the cited document.
+def quote_checker(sources, scope='block'):
+    """Returns verified(passage) for passages with a source block ID and a quote.
 
     Source blocks are often single lines, so a sentence can span consecutive blocks or a page break. A quote counts as verified when
-    all its segments are found in the document text and at least one overlaps the cited block."""
-    pages, documents = {}, {}
+    all its segments are found in the document text and at least one overlaps the cited block, or with scope 'page' any block of the cited block's page."""
+    pages, documents, page_of = {}, {}, {}
     for page in sources['pages']:
         documents.setdefault(page['document'], []).append(page)
     for pages_of_document in documents.values():
         text, spans = '', {}
         for page in pages_of_document:
+            page_start = len(text)
+            members = []
             for block in page['blocks']:
                 if re.fullmatch(r'\s*\d{1,4}\s*', block['text']):
                     continue  # bare page number between pages
                 piece = compact(re.sub(r'\n\s*\d{1,4}\s*$', '', block['text']))  # manuscript line number at the end of the line
                 spans[block['id']] = (len(text), len(text) + len(piece))
+                members.append(block['id'])
                 text += piece
+            for block_id in members:
+                page_of[block_id] = (page_start, len(text))
         for block_id in spans:
             pages[block_id] = (text, spans)
     def verified(passage):
-        segments = [s for s in (compact(part) for part in re.split(r'\.\.\.|\u2026', passage['quote'])) if s]
+        segments = [s for s in (compact(part).strip('.,;:') for part in re.split(r'\.\.\.|\u2026', passage['quote'])) if s]
         if not segments or passage['source'] not in pages:
             return False
         text, spans = pages[passage['source']]
-        start, end = spans[passage['source']]
+        start, end = page_of[passage['source']] if scope == 'page' else spans[passage['source']]
         overlaps = False
         for segment in segments:
             found = False
@@ -167,16 +172,36 @@ def verify_quotes(result, sources):
             if not found:
                 return False
         return overlaps
+    return verified
+
+
+def verify_quotes(result, sources):
+    """Check by code that every quote occurs verbatim (ignoring quotes, dashes and whitespace) in the cited document."""
+    verified = quote_checker(sources)
     return {**result, 'checks': [{**check, 'declared_consistent': declared_consistent(check), 'passages': [{**p, 'quote_verified': verified(p)} for p in check['passages']]} for check in result['checks']]}
 
 
-def review_prompt(sources, settings, pages, crosscheck=None):
+def experiments_prompt(sources, settings):
+    text, omitted = select_blocks(sources['pages'], settings['experiments_text_chars'], lambda p: p['role_hint'] not in {'references_candidate', 'resources'})
+    coverage = {'omitted_blocks': omitted, 'images': 'No images are supplied to this stage.', 'warnings': sources['warnings']}
+    return (stage_prompt('experiments', settings) + '\n\nORIGINAL TEXT OF ALL SUPPLIED DOCUMENTS\n' + text +
+            '\n\nCONTEXT COVERAGE\n' + json.dumps(coverage, ensure_ascii=False)), omitted
+
+
+def verify_experiments(result, sources):
+    verified = quote_checker(sources, scope='page')
+    return {**result, 'experiments': [{**e, 'evidence': [{**q, 'quote_verified': verified(q)} for q in e['evidence']]} for e in result['experiments']]}
+
+
+def review_prompt(sources, settings, pages, crosscheck=None, experiments=None):
     methods, omitted_methods = method_context(sources, settings)
     required = '\n\nPAGE EVIDENCE RECORDS (MODEL OUTPUTS, NOT GROUND TRUTH)\n' + json.dumps(pages, ensure_ascii=False)
     required += '\n\nCOMPLETE SOURCE INVENTORY (NOT ALL SOURCE CONTENT IS IN THIS PROMPT)\n' + json.dumps(inventory(sources), ensure_ascii=False)
     required += '\n\nORIGINAL METHODS CONTEXT\n' + methods
     if crosscheck is not None:
         required += '\n\nCROSS-CHECK FINDINGS (MODEL OUTPUT; quote_verified is set by code that searched the cited original block)\n' + json.dumps({**crosscheck, 'checks': reported_checks(crosscheck)}, ensure_ascii=False)
+    if experiments is not None:
+        required += '\n\nEXPERIMENT INVENTORY (MODEL OUTPUT FROM THE ORIGINAL TEXT; quote_verified is set by code that searched the cited original block)\n' + json.dumps(experiments, ensure_ascii=False)
     if len(required) > settings['review_text_chars']:
         raise ValueError('Mandatory review context exceeds review_text_chars. No evidence silently dropped; use a new protocol with a larger context budget')
     original, omitted_original = select_blocks(sources['pages'], settings['review_text_chars']-len(required), lambda p: p['role_hint'] not in {'references_candidate', 'resources'})
@@ -220,6 +245,21 @@ def render_report(root):
             if len(cross['checks']) == set_aside:
                 lines.extend(['- No cross-passage findings reported.', ''])
             lines.extend(['Not checked: ' + '; '.join(cross['not_checked']) if cross['not_checked'] else 'Not checked: nothing listed.', ''])
+        inventory_path = directory/'experiments.json'
+        if inventory_path.exists():
+            lines.extend(['### Experiment inventory', '', 'Built from the original text only; quotes are marked verified or UNVERIFIED by code.', ''])
+            for e in read(inventory_path)['experiments']:
+                lines.append(f"- {e['id']} [{e['label']}] serves: {e['claim_served']}")
+                lines.append(f"  - question: {e['question_or_hypothesis']} ({e['hypothesis_timing']}); endpoint: {e['endpoint']}; measured by: {e['measurement_principle']}")
+                lines.append(f"  - layout: {e['groups_and_conditions']}; replicate unit: {e['replicate_unit']}; N: {e['n_reported']}; representativity: {e['representativity']}")
+                lines.append('  - controls: ' + ('; '.join(f"{c['control']} (addresses: {c['alternative_addressed']})" for c in e['controls']) or 'none mentioned'))
+                if e['expected_controls_not_mentioned']:
+                    lines.append('  - expected controls not mentioned in the supplied text: ' + '; '.join(e['expected_controls_not_mentioned']))
+                lines.append(f"  - statistics: {e['statistics']}")
+                if e['information_not_stated']:
+                    lines.append('  - not stated: ' + '; '.join(e['information_not_stated']))
+                lines.extend(f"  - {'verified' if q['quote_verified'] else 'UNVERIFIED'} {q['source']}: {q['quote']} ({q['supports']})" for q in e['evidence'])
+                lines.append('')
         for key in ('hypotheses', 'scientific_practice', 'claim_measurement_links', 'reporting_and_statistics', 'triangulation', 'validation_gaps'):
             if key not in review:
                 continue
@@ -301,7 +341,15 @@ def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_j
                     crosscheck = verify_quotes(found, sources)
                     write(directory/'crosscheck.json', crosscheck)
                     write(directory/'crosscheck_coverage.json', {'omitted_blocks': omitted})
-                result = call(directory/'review_job', stage='review', prompt=review_prompt(sources, config['settings'], results, crosscheck),
+                experiments = None
+                if has_inventory(config['settings']):
+                    prompt, omitted = experiments_prompt(sources, config['settings'])
+                    found = call(directory/'experiments_job', stage='experiments', prompt=prompt, images=[], source_ids=source_ids(sources),
+                        settings=config['settings'], retry_failed=retry_failed)
+                    experiments = verify_experiments(found, sources)
+                    write(directory/'experiments.json', experiments)
+                    write(directory/'experiments_coverage.json', {'omitted_blocks': omitted})
+                result = call(directory/'review_job', stage='review', prompt=review_prompt(sources, config['settings'], results, crosscheck, experiments),
                     images=[], source_ids=source_ids(sources), settings=config['settings'], retry_failed=retry_failed)
                 write(directory/'review.json', result)
                 write(directory/'status.json', {'status': 'complete', 'ended': now(), 'pages': len(results), 'scientific_accuracy': 'unverified'})

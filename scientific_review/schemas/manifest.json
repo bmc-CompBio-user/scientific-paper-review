@@ -83,6 +83,16 @@
           "type": "integer",
           "minimum": 20000,
           "maximum": 600000
+        },
+        "experiments_num_predict": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65536
+        },
+        "experiments_text_chars": {
+          "type": "integer",
+          "minimum": 20000,
+          "maximum": 600000
         }
       }
     },
