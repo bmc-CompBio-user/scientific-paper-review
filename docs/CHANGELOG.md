@@ -1,5 +1,9 @@
 # Changes
 
+## Cross-check post-processing (rubrics 1.2.0 and later)
+
+Cross-check items whose own explanation says the passages agree (for example 'No conflict found' or 'Consistent', or a consequence starting with 'None') are marked `declared_consistent` in `crosscheck.json`, kept there, and left out of the review prompt and the report except for a count. This is a deterministic text rule and does not depend on the prompt, which did not remove the mislabelling in two further cases. Explanations containing 'however', 'but', 'although', 'whereas' or 'mismatch' are never set aside. The implementation fingerprint changed; use new run IDs. Earlier runs keep their reports.
+
 ## Rubric 1.3.0 (opt-in)
 
 Adds two rubric dimensions derived from `priorities.md`: inference design and analysis fit (unit of inference versus lower-level observations, scale and model fit, hand-set thresholds, treatment-batch confounding, exploratory versus confirmatory) and negative and absence evidence (detection sensitivity, positive controls, no claim above moderate on non-detection alone). The review's `reporting_and_statistics` accepts up to ten findings and four new aspects (`unit_of_inference`, `scale_and_model`, `batch_and_metadata`, `negative_evidence`). The page prompt asks for the detection limit of negative observations. The cross-check prompt now says to omit checks whose passages agree and to keep reasoning out of the fields, after cross-check items labelled as conflicts were seen with the explanation 'no conflict found' and with visible self-correction. Otherwise identical to 1.2.0. Select with `"rubric": "scientific-method-v1.3.0"`; use a new run ID. Not yet evaluated across independent studies; see the comparison register.

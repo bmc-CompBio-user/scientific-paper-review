@@ -116,6 +116,21 @@ def compact(text):
     return re.sub(r'[\s"\'`\u2018\u2019\u201c\u201d\u00b4]+', '', text).replace('\u2013', '-').replace('\u2014', '-').lower()
 
 
+CONSISTENT = re.compile(r'(?:^|[.;]\s+)(?:there is |this is )?(?:no (?:direct )?(?:conflict|contradiction|disagreement|inconsistency)\b|consistent\b)', re.I)
+
+
+def declared_consistent(check):
+    """True when the model's own explanation or consequence says the passages agree, although its relation label says conflict."""
+    explanation = check.get('explanation', '').strip()
+    if re.search(r'\b(however|but|although|whereas|mismatch)\b', explanation, re.I):
+        return False
+    return bool(CONSISTENT.search(explanation)) or check.get('consequence', '').strip().lower().startswith('none')
+
+
+def reported_checks(crosscheck):
+    return [c for c in crosscheck['checks'] if not c.get('declared_consistent')]
+
+
 def verify_quotes(result, sources):
     """Check by code that every quote occurs verbatim (ignoring quotes, dashes and whitespace) in the cited document.
 
@@ -152,7 +167,7 @@ def verify_quotes(result, sources):
             if not found:
                 return False
         return overlaps
-    return {**result, 'checks': [{**check, 'passages': [{**p, 'quote_verified': verified(p)} for p in check['passages']]} for check in result['checks']]}
+    return {**result, 'checks': [{**check, 'declared_consistent': declared_consistent(check), 'passages': [{**p, 'quote_verified': verified(p)} for p in check['passages']]} for check in result['checks']]}
 
 
 def review_prompt(sources, settings, pages, crosscheck=None):
@@ -161,7 +176,7 @@ def review_prompt(sources, settings, pages, crosscheck=None):
     required += '\n\nCOMPLETE SOURCE INVENTORY (NOT ALL SOURCE CONTENT IS IN THIS PROMPT)\n' + json.dumps(inventory(sources), ensure_ascii=False)
     required += '\n\nORIGINAL METHODS CONTEXT\n' + methods
     if crosscheck is not None:
-        required += '\n\nCROSS-CHECK FINDINGS (MODEL OUTPUT; quote_verified is set by code that searched the cited original block)\n' + json.dumps(crosscheck, ensure_ascii=False)
+        required += '\n\nCROSS-CHECK FINDINGS (MODEL OUTPUT; quote_verified is set by code that searched the cited original block)\n' + json.dumps({**crosscheck, 'checks': reported_checks(crosscheck)}, ensure_ascii=False)
     if len(required) > settings['review_text_chars']:
         raise ValueError('Mandatory review context exceeds review_text_chars. No evidence silently dropped; use a new protocol with a larger context budget')
     original, omitted_original = select_blocks(sources['pages'], settings['review_text_chars']-len(required), lambda p: p['role_hint'] not in {'references_candidate', 'resources'})
@@ -196,10 +211,13 @@ def render_report(root):
         if cross_path.exists():
             cross = read(cross_path)
             lines.extend(['### Cross-check of passages', '', 'Quotes are marked by code as found verbatim in the cited block (verified) or not (unverified).', ''])
-            for check in cross['checks']:
+            for check in reported_checks(cross):
                 lines.extend([f"- [{check['relation']}] {check['category']}: {check['topic']}. {check['explanation']} Consequence: {check['consequence']}"] +
                     [f"  - {'verified' if p['quote_verified'] else 'UNVERIFIED'} {p['source']}: {p['quote']}" for p in check['passages']] + [''])
-            if not cross['checks']:
+            set_aside = sum(1 for c in cross['checks'] if c.get('declared_consistent'))
+            if set_aside:
+                lines.extend([f'{set_aside} further checks were set aside because the explanation given for them says the passages agree.', ''])
+            if len(cross['checks']) == set_aside:
                 lines.extend(['- No cross-passage findings reported.', ''])
             lines.extend(['Not checked: ' + '; '.join(cross['not_checked']) if cross['not_checked'] else 'Not checked: nothing listed.', ''])
         for key in ('hypotheses', 'scientific_practice', 'claim_measurement_links', 'reporting_and_statistics', 'triangulation', 'validation_gaps'):

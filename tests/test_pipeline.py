@@ -397,6 +397,24 @@ class PipelineTests(unittest.TestCase):
         self.assertNotIn('unit_of_inference', old)
         self.assertIn('leave the check out', stage_prompt('crosscheck', settings))
 
+    def test_cross_check_labels_that_contradict_their_explanation_are_set_aside(self):
+        from scientific_review.pipeline import declared_consistent, reported_checks, verify_quotes
+        agree = ['Both state 100 ug. Consistent.', 'No conflict found. The text consistently states 3 min.', 'There is no conflict here; all passages state the same cutoff.',
+                 'No inconsistency was detected for this parameter.']
+        differ = ['The text states 4 replicates while the legend states 6.', 'No direct conflict, but the abstract omits one gene listed in the results.',
+                  'While this seems consistent, the Methods do not list the strains.']
+        for text in agree:
+            self.assertTrue(declared_consistent({'explanation': text, 'consequence': 'low'}), text)
+        for text in differ:
+            self.assertFalse(declared_consistent({'explanation': text, 'consequence': 'moderate'}), text)
+        self.assertTrue(declared_consistent({'explanation': 'The numbers match.', 'consequence': 'None. Consistency confirmed.'}))
+        sources = {'pages': [{'document': 'main', 'role_hint': 'content', 'blocks': [{'id': 'main.p001.b000', 'text': 'Four replicates were used.'}]}]}
+        found = {'checks': [{'relation': 'conflict', 'explanation': 'Consistent.', 'consequence': 'low', 'passages': [{'source': 'main.p001.b000', 'quote': 'Four replicates'}]},
+                            {'relation': 'conflict', 'explanation': 'Four versus six.', 'consequence': 'high', 'passages': [{'source': 'main.p001.b000', 'quote': 'Four replicates'}]}]}
+        checked = verify_quotes(found, sources)
+        self.assertEqual([c['declared_consistent'] for c in checked['checks']], [True, False])
+        self.assertEqual([c['explanation'] for c in reported_checks(checked)], ['Four versus six.'])
+
     def test_caption_pattern_accepts_common_journal_styles(self):
         from scientific_review.pdf import CAPTION
         for text in ('Figure 1. Legend', 'Fig. 2: Legend', 'Fig. 3 | Legend', 'Figure S4 \u2014 Legend', 'Fig. 5 \u2013 Legend'):
