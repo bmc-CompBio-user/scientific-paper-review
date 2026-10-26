@@ -93,6 +93,16 @@
           "type": "integer",
           "minimum": 20000,
           "maximum": 600000
+        },
+        "expcheck_num_predict": {
+          "type": "integer",
+          "minimum": 512,
+          "maximum": 32768
+        },
+        "expcheck_text_chars": {
+          "type": "integer",
+          "minimum": 20000,
+          "maximum": 600000
         }
       }
     },

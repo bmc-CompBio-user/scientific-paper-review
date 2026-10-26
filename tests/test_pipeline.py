@@ -458,6 +458,57 @@ class PipelineTests(unittest.TestCase):
             self.assertFalse((root/'papers/s1/experiments.json').exists())
             self.assertNotIn('EXPERIMENT INVENTORY', (root/'papers/s1/review_job/attempt_001/prompt.txt').read_text())
 
+    def test_rubric_v150_checks_each_experiment_before_review(self):
+        import re
+        def transport(host, route, payload=None, timeout=30):
+            if route == '/api/tags':
+                return {'models': [{'name': DEFAULTS['model'], 'digest': 'synthetic-digest'}]}
+            if route == '/api/version':
+                return {'version': 'synthetic'}
+            value = blank(payload['format'])
+            content = payload['messages'][1]['content']
+            if 'page_id' in value:
+                value['page_id'] = 'main.p001' if '"target_page": "main.p001"' in content else 'main.p002'
+            block = re.search(r'\[(main\.p\d+\.b\d+)\] [^\[]*?Three independent cultures per group', content)
+            if 'experiments' in value:
+                entry = blank(payload['format']['properties']['experiments']['items'])
+                entry.update(id='E1', label='Fig 1', replicate_unit='independent_biological', hypothesis_timing='unclear',
+                             evidence=[{'source': block[1], 'quote': 'Three independent cultures per group', 'supports': 'N'}])
+                value['experiments'] = [entry]
+            if 'items' in value:
+                self.assertIn('EXPERIMENT INVENTORY ENTRY', content)
+                self.assertIn('Three independent cultures per group', content)
+                item = blank(payload['format']['properties']['items']['items'])
+                item.update(item='unit_of_inference', status='concern', remedy='clarify_reporting', finding='N counts cultures', consequence_for_claim='limited',
+                            evidence=[{'source': block[1], 'quote': 'Three independent cultures per group'}, {'source': block[1], 'quote': 'Nine invented cultures'}])
+                ok = {**item, 'item': 'scale_and_model', 'status': 'ok', 'remedy': 'none', 'evidence': []}
+                value.update(experiment_id='E1', items=[item, ok])
+            return {'done': True, 'done_reason': 'stop', 'message': {'content': json.dumps(value)}}
+        config = read(self.manifest)
+        config['settings']['rubric'] = 'scientific-method-v1.5.0'
+        write(self.manifest, config)
+        with patch('scientific_review.provider.http', transport), patch('scientific_review.pipeline.call', side_effect=lambda *a, **k: call(*a, **k, transport=transport)):
+            root, errors = execute(self.manifest, 'chk', self.root/'runs')
+            self.assertFalse(errors)
+            self.assertEqual(read(root/'papers/s1/status.json')['status'], 'complete')
+            checks = read(root/'papers/s1/expchecks.json')
+            self.assertEqual([q['quote_verified'] for q in checks[0]['items'][0]['evidence']], [True, False])
+            prompt = (root/'papers/s1/review_job/attempt_001/prompt.txt').read_text()
+            self.assertIn('PER-EXPERIMENT CHECKS', prompt)
+            self.assertIn('unit_of_inference', prompt)
+            self.assertNotIn('scale_and_model', prompt[prompt.index('PER-EXPERIMENT CHECKS'):prompt.index('PER-EXPERIMENT CHECKS') + 1500])
+            report = (root/'report.md').read_text()
+            self.assertIn('Per-experiment checks', report)
+            before = list(root.rglob('attempt_*'))
+            execute(self.manifest, 'chk', self.root/'runs')
+            self.assertEqual(before, list(root.rglob('attempt_*')))
+        config['settings']['rubric'] = 'scientific-method-v1.4.0'
+        write(self.manifest, config)
+        with patch('scientific_review.provider.http', transport), patch('scientific_review.pipeline.call', side_effect=lambda *a, **k: call(*a, **k, transport=transport)):
+            root, errors = execute(self.manifest, 'nochk', self.root/'runs')
+            self.assertFalse(errors)
+            self.assertFalse((root/'papers/s1/expchecks.json').exists())
+
     def test_caption_pattern_accepts_common_journal_styles(self):
         from scientific_review.pdf import CAPTION
         for text in ('Figure 1. Legend', 'Fig. 2: Legend', 'Fig. 3 | Legend', 'Figure S4 \u2014 Legend', 'Fig. 5 \u2013 Legend'):

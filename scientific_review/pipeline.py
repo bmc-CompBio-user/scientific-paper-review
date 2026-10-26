@@ -6,7 +6,7 @@ from pathlib import Path
 import jsonschema
 import pymupdf
 from . import __version__
-from .common import PACKAGE, has_crosscheck, has_inventory, stage_prompt, digest, fingerprint, implementation_hash, lock, now, read, safe_id, write
+from .common import PACKAGE, has_crosscheck, has_expchecks, has_inventory, stage_prompt, digest, fingerprint, implementation_hash, lock, now, read, safe_id, write
 from .config import load
 from .pdf import extract
 from .provider import call, identity
@@ -193,7 +193,27 @@ def verify_experiments(result, sources):
     return {**result, 'experiments': [{**e, 'evidence': [{**q, 'quote_verified': verified(q)} for q in e['evidence']]} for e in result['experiments']]}
 
 
-def review_prompt(sources, settings, pages, crosscheck=None, experiments=None):
+def expcheck_prompt(entry, sources, settings):
+    cited = {q['source'].rsplit('.', 1)[0] for q in entry['evidence']}
+    clean = {k: v for k, v in entry.items() if k != 'evidence'}
+    clean['evidence'] = [{'source': q['source'], 'quote': q['quote'], 'supports': q['supports']} for q in entry['evidence']]
+    text, omitted = select_blocks(sources['pages'], settings['expcheck_text_chars'], lambda p: p['id'] in cited)
+    methods, omitted_methods = method_context(sources, settings)
+    return (stage_prompt('expcheck', settings) + '\n\nEXPERIMENT INVENTORY ENTRY\n' + json.dumps(clean, ensure_ascii=False) +
+            '\n\nORIGINAL TEXT OF THE CITED PAGES\n' + text + '\n\nORIGINAL METHODS CONTEXT\n' + methods), omitted + omitted_methods
+
+
+def verify_expchecks(result, sources):
+    verified = quote_checker(sources, scope='page')
+    return {**result, 'items': [{**i, 'evidence': [{**q, 'quote_verified': verified(q)} for q in i['evidence']]} for i in result['items']]}
+
+
+def reported_concerns(checks):
+    """Concerns first; ok items are kept in the file but not passed on."""
+    return [{'experiment_id': r['experiment_id'], 'label': r.get('label', ''), 'items': [i for i in r['items'] if i['status'] != 'ok']} for r in checks if any(i['status'] != 'ok' for i in r['items'])]
+
+
+def review_prompt(sources, settings, pages, crosscheck=None, experiments=None, expchecks=None):
     methods, omitted_methods = method_context(sources, settings)
     required = '\n\nPAGE EVIDENCE RECORDS (MODEL OUTPUTS, NOT GROUND TRUTH)\n' + json.dumps(pages, ensure_ascii=False)
     required += '\n\nCOMPLETE SOURCE INVENTORY (NOT ALL SOURCE CONTENT IS IN THIS PROMPT)\n' + json.dumps(inventory(sources), ensure_ascii=False)
@@ -202,6 +222,8 @@ def review_prompt(sources, settings, pages, crosscheck=None, experiments=None):
         required += '\n\nCROSS-CHECK FINDINGS (MODEL OUTPUT; quote_verified is set by code that searched the cited original block)\n' + json.dumps({**crosscheck, 'checks': reported_checks(crosscheck)}, ensure_ascii=False)
     if experiments is not None:
         required += '\n\nEXPERIMENT INVENTORY (MODEL OUTPUT FROM THE ORIGINAL TEXT; quote_verified is set by code that searched the cited original block)\n' + json.dumps(experiments, ensure_ascii=False)
+    if expchecks is not None:
+        required += '\n\nPER-EXPERIMENT CHECKS (MODEL OUTPUT; only concerns and not_assessable items are listed; quote_verified is set by code)\n' + json.dumps(reported_concerns(expchecks), ensure_ascii=False)
     if len(required) > settings['review_text_chars']:
         raise ValueError('Mandatory review context exceeds review_text_chars. No evidence silently dropped; use a new protocol with a larger context budget')
     original, omitted_original = select_blocks(sources['pages'], settings['review_text_chars']-len(required), lambda p: p['role_hint'] not in {'references_candidate', 'resources'})
@@ -259,6 +281,15 @@ def render_report(root):
                 if e['information_not_stated']:
                     lines.append('  - not stated: ' + '; '.join(e['information_not_stated']))
                 lines.extend(f"  - {'verified' if q['quote_verified'] else 'UNVERIFIED'} {q['source']}: {q['quote']} ({q['supports']})" for q in e['evidence'])
+                lines.append('')
+        checks_path = directory/'expchecks.json'
+        if checks_path.exists():
+            lines.extend(['### Per-experiment checks', '', 'Concerns and items that could not be assessed; ok items are in expchecks.json. Quotes are marked verified or UNVERIFIED by code.', ''])
+            for r in reported_concerns(read(checks_path)):
+                lines.append(f"- {r['experiment_id']} [{r['label']}]")
+                for i in r['items']:
+                    lines.append(f"  - {i['item']} ({i['status']}; remedy: {i['remedy']}): {i['finding']} Consequence: {i['consequence_for_claim']}")
+                    lines.extend(f"    - {'verified' if q['quote_verified'] else 'UNVERIFIED'} {q['source']}: {q['quote']}" for q in i['evidence'])
                 lines.append('')
         for key in ('hypotheses', 'scientific_practice', 'claim_measurement_links', 'reporting_and_statistics', 'triangulation', 'validation_gaps'):
             if key not in review:
@@ -349,7 +380,16 @@ def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_j
                     experiments = verify_experiments(found, sources)
                     write(directory/'experiments.json', experiments)
                     write(directory/'experiments_coverage.json', {'omitted_blocks': omitted})
-                result = call(directory/'review_job', stage='review', prompt=review_prompt(sources, config['settings'], results, crosscheck, experiments),
+                expchecks = None
+                if has_expchecks(config['settings']):
+                    expchecks = []
+                    for number, entry in enumerate(experiments['experiments'], 1):
+                        prompt, omitted = expcheck_prompt(entry, sources, config['settings'])
+                        found = call(directory/'expcheck_jobs'/f'{number:02d}', stage='expcheck', prompt=prompt, images=[], source_ids=source_ids(sources),
+                            settings=config['settings'], retry_failed=retry_failed)
+                        expchecks.append({**verify_expchecks(found, sources), 'label': entry['label']})
+                    write(directory/'expchecks.json', expchecks)
+                result = call(directory/'review_job', stage='review', prompt=review_prompt(sources, config['settings'], results, crosscheck, experiments, expchecks),
                     images=[], source_ids=source_ids(sources), settings=config['settings'], retry_failed=retry_failed)
                 write(directory/'review.json', result)
                 write(directory/'status.json', {'status': 'complete', 'ended': now(), 'pages': len(results), 'scientific_accuracy': 'unverified'})
