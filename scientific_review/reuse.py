@@ -59,7 +59,7 @@ def verify_reuse(folder, previous, payload, image_hashes, source_ids):
     import json
     if json.loads(response['message']['content'])!=value:
         raise ValueError('Imported parsed result differs from retained raw response')
-    jsonschema.validate(value,read(PACKAGE/'schemas/page.json'))
+    jsonschema.validate(value,payload['format'])  # the request schema of this rubric; page.json only fits rubric 1.0.x
     write(folder/'reuse_verified.json',{'verified':now(),'origin_run':provenance['origin_run'],
         'original_fingerprint':prior['fingerprint'],'current_request_fingerprint':fingerprint({'payload':payload,'images':image_hashes}),
         'original_num_predict':original['options']['num_predict'],'current_num_predict':payload['options']['num_predict'],
