@@ -32,6 +32,30 @@ def identity(settings):
     return {'ollama': http(settings['host'], '/api/version'), 'model': matches[0]}
 
 
+LENGTH_CAPPED_STAGES = {'crosscheck', 'experiments', 'expcheck'}
+STRING_CAPS = {'quote': 300, 'explanation': 900, 'consequence': 400, 'topic': 200, 'label': 200, 'id': 40, 'source': 60}
+DEFAULT_STRING_CAP = 700
+
+
+def cap_strings(node):
+    """Bound free-text lengths so that a repetition loop in one field cannot run until the token limit."""
+    if isinstance(node, dict):
+        properties = node.get('properties')
+        if isinstance(properties, dict):
+            for key, sub in properties.items():
+                if isinstance(sub, dict) and sub.get('type') == 'string' and 'enum' not in sub and 'maxLength' not in sub:
+                    sub['maxLength'] = STRING_CAPS.get(key, DEFAULT_STRING_CAP)
+        if node.get('type') == 'array' and isinstance(node.get('items'), dict):
+            item = node['items']
+            if item.get('type') == 'string' and 'enum' not in item and 'maxLength' not in item:
+                item['maxLength'] = 300
+        for value in node.values():
+            cap_strings(value)
+    elif isinstance(node, list):
+        for value in node:
+            cap_strings(value)
+
+
 def source_schema(name, source_ids, settings=None):
     schema = copy.deepcopy(read(stage_schema(name, settings or {"rubric": "scientific-method-v1.0.0"})))
     def visit(node):
@@ -50,6 +74,8 @@ def source_schema(name, source_ids, settings=None):
             for value in node:
                 visit(value)
     visit(schema)
+    if name in LENGTH_CAPPED_STAGES:
+        cap_strings(schema)
     return schema
 
 
@@ -133,6 +159,12 @@ def call(folder, *, stage, prompt, images, source_ids, settings, retry_failed=Fa
     started = time.monotonic()
     try:
         response = transport(settings['host'], '/api/chat', payload, settings['timeout_seconds'])
+        if response.get('done_reason') == 'length' and stage in LENGTH_CAPPED_STAGES:
+            # A stop at the token limit is usually a repetition loop; temperature 0 would repeat it, so retry once with a repetition penalty and keep both responses.
+            write(attempt/'response_length_stop.json', response)
+            payload['options'] = {**payload['options'], 'repeat_penalty': 1.1}
+            write(attempt/'request_retry.json', payload)
+            response = transport(settings['host'], '/api/chat', payload, settings['timeout_seconds'])
         write(attempt/'response.json', response)
         if not response.get('done') or response.get('done_reason') != 'stop':
             raise OperationalError('Response incomplete or token limit reached: ' + str(response.get('done_reason')))

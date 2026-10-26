@@ -509,6 +509,41 @@ class PipelineTests(unittest.TestCase):
             self.assertFalse(errors)
             self.assertFalse((root/'papers/s1/expchecks.json').exists())
 
+    def test_free_text_is_length_capped_for_new_stages_and_length_stops_retry_once(self):
+        settings = {**DEFAULTS, 'rubric': 'scientific-method-v1.5.0'}
+        schema = source_schema('crosscheck', {'main.p001.b000'}, settings)
+        check = schema['properties']['checks']['items']['properties']
+        self.assertEqual(check['explanation']['maxLength'], 900)
+        self.assertEqual(check['consequence']['maxLength'], 400)
+        self.assertEqual(check['passages']['items']['properties']['quote']['maxLength'], 300)
+        self.assertNotIn('maxLength', check['category'])
+        inventory = source_schema('experiments', {'main.p001.b000'}, settings)
+        self.assertEqual(inventory['properties']['experiments']['items']['properties']['expected_controls_not_mentioned']['items']['maxLength'], 300)
+        self.assertNotIn('maxLength', json.dumps(source_schema('review', {'main.p001.b000'}, settings)))
+        seen = []
+        def transport(host, route, payload=None, timeout=30):
+            seen.append(payload['options'].get('repeat_penalty'))
+            value = blank(payload['format'])
+            if len(seen) == 1:
+                return {'done': True, 'done_reason': 'length', 'message': {'content': '{"scope": "Let us look. No. Let us look. No.'}}
+            return {'done': True, 'done_reason': 'stop', 'message': {'content': json.dumps(value)}}
+        kwargs = dict(stage='crosscheck', prompt='p', images=[], source_ids={'main.p001.b000'}, settings=settings)
+        result = call(self.root/'cap', **kwargs, transport=transport)
+        self.assertEqual(seen, [None, 1.1])
+        self.assertIn('scope', result)
+        self.assertTrue((self.root/'cap/attempt_001/response_length_stop.json').exists())
+        always = lambda *a, **k: {'done': True, 'done_reason': 'length', 'message': {'content': '{'}}
+        with self.assertRaises(OperationalError):
+            call(self.root/'cap2', **kwargs, transport=always)
+        review_kwargs = {**kwargs, 'stage': 'review'}
+        calls = []
+        def once(host, route, payload=None, timeout=30):
+            calls.append(1)
+            return {'done': True, 'done_reason': 'length', 'message': {'content': '{'}}
+        with self.assertRaises(OperationalError):
+            call(self.root/'cap3', **review_kwargs, transport=once)
+        self.assertEqual(len(calls), 1)
+
     def test_caption_pattern_accepts_common_journal_styles(self):
         from scientific_review.pdf import CAPTION
         for text in ('Figure 1. Legend', 'Fig. 2: Legend', 'Fig. 3 | Legend', 'Figure S4 \u2014 Legend', 'Fig. 5 \u2013 Legend'):
