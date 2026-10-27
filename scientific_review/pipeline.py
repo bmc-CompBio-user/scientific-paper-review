@@ -213,6 +213,18 @@ def reported_concerns(checks):
     return [{'experiment_id': r['experiment_id'], 'label': r.get('label', ''), 'items': [i for i in r['items'] if i['status'] != 'ok']} for r in checks if any(i['status'] != 'ok' for i in r['items'])]
 
 
+def inventory_for_review(experiments):
+    """Quotes are kept in experiments.json; the review gets the source block and the code verification result per quote."""
+    return {**experiments, 'experiments': [{**e, 'evidence': [{'source': q['source'], 'supports': q['supports'], 'quote_verified': q['quote_verified']} for q in e['evidence']]} for e in experiments['experiments']]}
+
+
+def concerns_for_review(checks):
+    """Compact form for the review prompt: shortened text and, per quote, only the source block and the code verification result (the original text is in the same prompt)."""
+    cut = lambda text, size: text if len(text) <= size else text[:size].rsplit(' ', 1)[0] + ' ...'
+    return [{**r, 'items': [{'item': i['item'], 'status': i['status'], 'remedy': i['remedy'], 'finding': cut(i['finding'], 260), 'consequence_for_claim': cut(i['consequence_for_claim'], 160),
+                             'evidence': [{'source': q['source'], 'quote_verified': q['quote_verified']} for q in i['evidence']]} for i in r['items']]} for r in reported_concerns(checks)]
+
+
 def review_prompt(sources, settings, pages, crosscheck=None, experiments=None, expchecks=None):
     methods, omitted_methods = method_context(sources, settings)
     required = '\n\nPAGE EVIDENCE RECORDS (MODEL OUTPUTS, NOT GROUND TRUTH)\n' + json.dumps(pages, ensure_ascii=False)
@@ -221,9 +233,9 @@ def review_prompt(sources, settings, pages, crosscheck=None, experiments=None, e
     if crosscheck is not None:
         required += '\n\nCROSS-CHECK FINDINGS (MODEL OUTPUT; quote_verified is set by code that searched the cited original block)\n' + json.dumps({**crosscheck, 'checks': reported_checks(crosscheck)}, ensure_ascii=False)
     if experiments is not None:
-        required += '\n\nEXPERIMENT INVENTORY (MODEL OUTPUT FROM THE ORIGINAL TEXT; quote_verified is set by code that searched the cited original block)\n' + json.dumps(experiments, ensure_ascii=False)
+        required += '\n\nEXPERIMENT INVENTORY (MODEL OUTPUT FROM THE ORIGINAL TEXT; quote_verified is set by code that searched the cited original block)\n' + json.dumps(inventory_for_review(experiments), ensure_ascii=False)
     if expchecks is not None:
-        required += '\n\nPER-EXPERIMENT CHECKS (MODEL OUTPUT; only concerns and not_assessable items are listed; quote_verified is set by code)\n' + json.dumps(reported_concerns(expchecks), ensure_ascii=False)
+        required += '\n\nPER-EXPERIMENT CHECKS (MODEL OUTPUT; only concerns and not_assessable items are listed, text shortened; quote_verified is set by code against the quoted passage, which is not repeated here)\n' + json.dumps(concerns_for_review(expchecks), ensure_ascii=False)
     if len(required) > settings['review_text_chars']:
         raise ValueError('Mandatory review context exceeds review_text_chars. No evidence silently dropped; use a new protocol with a larger context budget')
     original, omitted_original = select_blocks(sources['pages'], settings['review_text_chars']-len(required), lambda p: p['role_hint'] not in {'references_candidate', 'resources'})
