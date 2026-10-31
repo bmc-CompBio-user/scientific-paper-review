@@ -25,6 +25,8 @@ def import_page_job(source, target, origin_run):
 def normalized(payload):
     payload=copy.deepcopy(payload)
     payload['options']['num_predict']=0
+    system=payload['messages'][0]
+    system['content']=system['content'].split('\n',1)[-1]  # the title line carries the rubric version and differs between otherwise identical rubrics
     def visit(node):
         if isinstance(node,dict):
             for key,value in node.items():

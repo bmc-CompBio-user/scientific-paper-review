@@ -617,6 +617,12 @@ class PipelineTests(unittest.TestCase):
             self.assertFalse(errors)
             self.assertNotIn('KNOWLEDGE GRAPH', (root/'papers/s1/review_job/attempt_001/prompt.txt').read_text())
 
+    def test_reuse_comparison_ignores_the_rubric_title_line_only(self):
+        from scientific_review.reuse import normalized
+        payload = lambda title, body: {'options': {'num_predict': 5}, 'messages': [{'role': 'system', 'content': title + '\n' + body}, {'role': 'user', 'content': 'x'}], 'format': {}}
+        self.assertEqual(normalized(payload('# Rubric 1.5.0', 'same')), normalized(payload('# Rubric 1.6.0', 'same')))
+        self.assertNotEqual(normalized(payload('# Rubric 1.5.0', 'same')), normalized(payload('# Rubric 1.5.0', 'different')))
+
     def test_caption_pattern_accepts_common_journal_styles(self):
         from scientific_review.pdf import CAPTION
         for text in ('Figure 1. Legend', 'Fig. 2: Legend', 'Fig. 3 | Legend', 'Figure S4 \u2014 Legend', 'Fig. 5 \u2013 Legend'):
