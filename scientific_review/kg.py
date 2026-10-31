@@ -86,7 +86,7 @@ def render_dataset(dataset):
 
 
 def render_kg(directory, max_chars):
-    """Experiments first, then datasets, then analyses and the extraction's own flags; trimmed to max_chars by dropping analyses and issues last-first."""
+    """Experiments first, then datasets, then analyses and the extraction's own flags; trimmed to max_chars by dropping flags, analyses and datasets first and experiments last (at least one experiment is kept)."""
     experiments_path, issues_path = kg_files(directory)
     kg = json.loads(experiments_path.read_text())
     issues = json.loads(issues_path.read_text()) if issues_path.exists() else {}
@@ -112,7 +112,7 @@ def render_kg(directory, max_chars):
             limits[index] -= 1
             result = build(limits)
     if len(result) > max_chars:
-        while len(result) > max_chars and limits[0] > 0:
+        while len(result) > max_chars and limits[0] > 1:
             limits[0] -= 1
             result = build(limits)
     dropped = [f'{title}: {len(items) - limit} of {len(items)} omitted' for (title, items), limit in zip(sections, limits) if limit < len(items)]

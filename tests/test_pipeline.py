@@ -572,7 +572,7 @@ class PipelineTests(unittest.TestCase):
         self.assertIn('DS-001 Growth data | origin: primary | produced by EXP-001', text)
         self.assertIn('links: consumes DS-001', text)
         self.assertIn('issues: quote not found verbatim', text)
-        short = render_kg(directory, 700)
+        short = render_kg(directory, 1000)
         self.assertIn('EXP-001', short)
         self.assertIn('omitted', short)
         before = kg_digest(directory)
