@@ -6,9 +6,10 @@ from pathlib import Path
 import jsonschema
 import pymupdf
 from . import __version__
-from .common import PACKAGE, has_crosscheck, has_expchecks, has_inventory, stage_prompt, digest, fingerprint, implementation_hash, lock, now, read, safe_id, write
+from .common import PACKAGE, has_crosscheck, has_expchecks, has_inventory, has_kg, stage_prompt, digest, fingerprint, implementation_hash, lock, now, read, safe_id, write
 from .config import load
 from .pdf import extract
+from .kg import kg_digest, render_kg
 from .provider import call, identity
 from .reuse import import_page_job
 
@@ -25,7 +26,7 @@ def initialize(config, root):
         write(path, {'fingerprint': fingerprint(protocol), 'protocol': protocol, 'created': now()})
     cohort_path = root/'cohort.json'
     cohort = read(cohort_path) if cohort_path.exists() else {}
-    new = {p['id']: {**p, 'documents': [{**d, 'sha256': digest(d['path'])} for d in p['documents']]} for p in config['papers']}
+    new = {p['id']: {**p, 'documents': [{**d, 'sha256': digest(d['path'])} for d in p['documents']], **({'kg_sha256': kg_digest(p['kg_dir'])} if p.get('kg_dir') else {})} for p in config['papers']}
     for key, old in cohort.items():
         if key not in new or new[key] != old:
             raise ValueError('Existing cohort membership/metadata/input changed: ' + key + '; use a new run ID')
@@ -181,11 +182,13 @@ def verify_quotes(result, sources):
     return {**result, 'checks': [{**check, 'declared_consistent': declared_consistent(check), 'passages': [{**p, 'quote_verified': verified(p)} for p in check['passages']]} for check in result['checks']]}
 
 
-def experiments_prompt(sources, settings):
+def experiments_prompt(sources, settings, kg=None):
     text, omitted = select_blocks(sources['pages'], settings['experiments_text_chars'], lambda p: p['role_hint'] not in {'references_candidate', 'resources'})
     coverage = {'omitted_blocks': omitted, 'images': 'No images are supplied to this stage.', 'warnings': sources['warnings']}
-    return (stage_prompt('experiments', settings) + '\n\nORIGINAL TEXT OF ALL SUPPLIED DOCUMENTS\n' + text +
-            '\n\nCONTEXT COVERAGE\n' + json.dumps(coverage, ensure_ascii=False)), omitted
+    prompt = stage_prompt('experiments', settings) + '\n\nORIGINAL TEXT OF ALL SUPPLIED DOCUMENTS\n' + text
+    if kg is not None:
+        prompt += '\n\n' + kg
+    return prompt + '\n\nCONTEXT COVERAGE\n' + json.dumps(coverage, ensure_ascii=False), omitted
 
 
 def verify_experiments(result, sources):
@@ -225,7 +228,7 @@ def concerns_for_review(checks):
                              'evidence': [{'source': q['source'], 'quote_verified': q['quote_verified']} for q in i['evidence']]} for i in r['items']]} for r in reported_concerns(checks)]
 
 
-def review_prompt(sources, settings, pages, crosscheck=None, experiments=None, expchecks=None):
+def review_prompt(sources, settings, pages, crosscheck=None, experiments=None, expchecks=None, kg=None):
     methods, omitted_methods = method_context(sources, settings)
     required = '\n\nPAGE EVIDENCE RECORDS (MODEL OUTPUTS, NOT GROUND TRUTH)\n' + json.dumps(pages, ensure_ascii=False)
     required += '\n\nCOMPLETE SOURCE INVENTORY (NOT ALL SOURCE CONTENT IS IN THIS PROMPT)\n' + json.dumps(inventory(sources), ensure_ascii=False)
@@ -236,6 +239,8 @@ def review_prompt(sources, settings, pages, crosscheck=None, experiments=None, e
         required += '\n\nEXPERIMENT INVENTORY (MODEL OUTPUT FROM THE ORIGINAL TEXT; quote_verified is set by code that searched the cited original block)\n' + json.dumps(inventory_for_review(experiments), ensure_ascii=False)
     if expchecks is not None:
         required += '\n\nPER-EXPERIMENT CHECKS (MODEL OUTPUT; only concerns and not_assessable items are listed, text shortened; quote_verified is set by code against the quoted passage, which is not repeated here)\n' + json.dumps(concerns_for_review(expchecks), ensure_ascii=False)
+    if kg is not None:
+        required += '\n\n' + kg
     if len(required) > settings['review_text_chars']:
         raise ValueError('Mandatory review context exceeds review_text_chars. No evidence silently dropped; use a new protocol with a larger context budget')
     original, omitted_original = select_blocks(sources['pages'], settings['review_text_chars']-len(required), lambda p: p['role_hint'] not in {'references_candidate', 'resources'})
@@ -384,9 +389,15 @@ def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_j
                     crosscheck = verify_quotes(found, sources)
                     write(directory/'crosscheck.json', crosscheck)
                     write(directory/'crosscheck_coverage.json', {'omitted_blocks': omitted})
+                kg = None
+                if has_kg(config['settings']):
+                    if not paper.get('kg_dir'):
+                        raise ValueError('Rubric 1.6.0 needs kg_dir for each paper in the manifest')
+                    kg = render_kg(paper['kg_dir'], config['settings']['kg_text_chars'])
+                    (directory/'kg_context.txt').write_text(kg, encoding='utf-8')
                 experiments = None
                 if has_inventory(config['settings']):
-                    prompt, omitted = experiments_prompt(sources, config['settings'])
+                    prompt, omitted = experiments_prompt(sources, config['settings'], kg)
                     found = call(directory/'experiments_job', stage='experiments', prompt=prompt, images=[], source_ids=source_ids(sources),
                         settings=config['settings'], retry_failed=retry_failed)
                     experiments = verify_experiments(found, sources)
@@ -401,7 +412,7 @@ def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_j
                             settings=config['settings'], retry_failed=retry_failed)
                         expchecks.append({**verify_expchecks(found, sources), 'label': entry['label']})
                     write(directory/'expchecks.json', expchecks)
-                result = call(directory/'review_job', stage='review', prompt=review_prompt(sources, config['settings'], results, crosscheck, experiments, expchecks),
+                result = call(directory/'review_job', stage='review', prompt=review_prompt(sources, config['settings'], results, crosscheck, experiments, expchecks, kg),
                     images=[], source_ids=source_ids(sources), settings=config['settings'], retry_failed=retry_failed)
                 write(directory/'review.json', result)
                 write(directory/'status.json', {'status': 'complete', 'ended': now(), 'pages': len(results), 'scientific_accuracy': 'unverified'})

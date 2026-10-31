@@ -544,6 +544,79 @@ class PipelineTests(unittest.TestCase):
             call(self.root/'cap3', **review_kwargs, transport=once)
         self.assertEqual(len(calls), 1)
 
+    def kg_fixture(self, name='kg'):
+        directory = self.root/name
+        directory.mkdir(exist_ok=True)
+        field = lambda value, status='reported': {'status': status, 'value': value, 'evidence': ['EV-1'], 'note': None}
+        gap = {'status': 'not_reported', 'value': None, 'evidence': [], 'note': None}
+        record = {'id': 'EXP-001', 'kind': 'validation', 'name': 'Culture growth assay', 'panels': [{'figure': 'Figure 1', 'panel': 'a'}],
+                  'system': {'organism': field('mouse'), 'cell_line': gap}, 'conditions': {'controls': gap, 'comparison': field('treated vs untreated')},
+                  'measurement': {'readout': field('cell count', 'ambiguous')}, 'design': {'biological_replicates': gap}, 'analysis': {'statistical_method': gap},
+                  'consumes': [], 'derived_from': [], 'notes': ['proposed by candidates-v0.4']}
+        graph = {'run': 'x', 'experiments': [record], 'analyses': [{**record, 'id': 'AN-001', 'name': 'Overlap analysis', 'consumes': [{'target': 'DS-001'}]}],
+                 'datasets': [{'id': 'DS-001', 'name': 'Growth data', 'origin': 'primary', 'produced_by': {'target': 'EXP-001'}, 'derived_from': [], 'accession': {'status': 'not_reported', 'value': None}, 'resource': None}],
+                 'evidence': [], 'discrepancies': []}
+        (directory/'experiments.json').write_text(json.dumps(graph))
+        (directory/'unresolved_issues.json').write_text(json.dumps({'issues': [{'question': 'quote not found verbatim'}], 'ambiguities': []}))
+        return directory
+
+    def test_kg_rendering_keeps_lineage_status_and_key_gaps(self):
+        from scientific_review.kg import render_kg, kg_digest
+        directory = self.kg_fixture()
+        text = render_kg(directory, 60000)
+        self.assertIn('EXP-001 [validation] Culture growth assay | panels: Figure 1a', text)
+        self.assertIn('organism=mouse', text)
+        self.assertIn('readout=cell count [ambiguous]', text)
+        self.assertIn('not reported by the extraction: conditions.controls, design.experimental_unit, design.biological_replicates, design.technical_replicates, analysis.statistical_method, analysis.normalization', text)
+        self.assertNotIn('cell_line', text)
+        self.assertIn('DS-001 Growth data | origin: primary | produced by EXP-001', text)
+        self.assertIn('links: consumes DS-001', text)
+        self.assertIn('issues: quote not found verbatim', text)
+        short = render_kg(directory, 700)
+        self.assertIn('EXP-001', short)
+        self.assertIn('omitted', short)
+        before = kg_digest(directory)
+        (directory/'unresolved_issues.json').write_text('{}')
+        self.assertNotEqual(before, kg_digest(directory))
+
+    def test_rubric_v160_passes_the_graph_to_inventory_and_review(self):
+        import re
+        def transport(host, route, payload=None, timeout=30):
+            if route == '/api/tags':
+                return {'models': [{'name': DEFAULTS['model'], 'digest': 'synthetic-digest'}]}
+            if route == '/api/version':
+                return {'version': 'synthetic'}
+            value = blank(payload['format'])
+            content = payload['messages'][1]['content']
+            if 'page_id' in value:
+                value['page_id'] = 'main.p001' if '"target_page": "main.p001"' in content else 'main.p002'
+            return {'done': True, 'done_reason': 'stop', 'message': {'content': json.dumps(value)}}
+        directory = self.kg_fixture()
+        config = read(self.manifest)
+        config['settings']['rubric'] = 'scientific-method-v1.6.0'
+        write(self.manifest, config)
+        with patch('scientific_review.provider.http', transport), patch('scientific_review.pipeline.call', side_effect=lambda *a, **k: call(*a, **k, transport=transport)):
+            root, errors = execute(self.manifest, 'nokg', self.root/'runs')
+            self.assertTrue(errors)
+            self.assertIn('kg_dir', errors[0]['error'])
+            config['papers'][0]['kg_dir'] = str(directory)
+            write(self.manifest, config)
+            root, errors = execute(self.manifest, 'withkg', self.root/'runs')
+            self.assertFalse(errors)
+            self.assertIn('EXPERIMENT KNOWLEDGE GRAPH', (root/'papers/s1/experiments_job/attempt_001/prompt.txt').read_text())
+            self.assertIn('EXPERIMENT KNOWLEDGE GRAPH', (root/'papers/s1/review_job/attempt_001/prompt.txt').read_text())
+            self.assertIn('Culture growth assay', (root/'papers/s1/kg_context.txt').read_text())
+            self.assertIn('kg_sha256', read(root/'cohort.json')['s1'])
+            (directory/'unresolved_issues.json').write_text('{"issues": []}')
+            with self.assertRaises(ValueError):
+                execute(self.manifest, 'withkg', self.root/'runs')
+        config['settings']['rubric'] = 'scientific-method-v1.5.0'
+        write(self.manifest, config)
+        with patch('scientific_review.provider.http', transport), patch('scientific_review.pipeline.call', side_effect=lambda *a, **k: call(*a, **k, transport=transport)):
+            root, errors = execute(self.manifest, 'v150', self.root/'runs')
+            self.assertFalse(errors)
+            self.assertNotIn('KNOWLEDGE GRAPH', (root/'papers/s1/review_job/attempt_001/prompt.txt').read_text())
+
     def test_caption_pattern_accepts_common_journal_styles(self):
         from scientific_review.pdf import CAPTION
         for text in ('Figure 1. Legend', 'Fig. 2: Legend', 'Fig. 3 | Legend', 'Figure S4 \u2014 Legend', 'Fig. 5 \u2013 Legend'):

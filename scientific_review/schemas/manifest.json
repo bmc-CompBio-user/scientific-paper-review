@@ -103,6 +103,11 @@
           "type": "integer",
           "minimum": 20000,
           "maximum": 600000
+        },
+        "kg_text_chars": {
+          "type": "integer",
+          "minimum": 5000,
+          "maximum": 300000
         }
       }
     },
@@ -156,6 +161,9 @@
               ]
             },
             "minItems": 1
+          },
+          "kg_dir": {
+            "type": "string"
           }
         },
         "required": [

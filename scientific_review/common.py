@@ -9,7 +9,7 @@ import re
 import tempfile
 
 PACKAGE = Path(__file__).resolve().parent
-RUBRICS = ("scientific-method-v1.0.0", "scientific-method-v1.1.0", "scientific-method-v1.1.1", "scientific-method-v1.2.0", "scientific-method-v1.3.0", "scientific-method-v1.4.0", "scientific-method-v1.5.0")
+RUBRICS = ("scientific-method-v1.0.0", "scientific-method-v1.1.0", "scientific-method-v1.1.1", "scientific-method-v1.2.0", "scientific-method-v1.3.0", "scientific-method-v1.4.0", "scientific-method-v1.5.0", "scientific-method-v1.6.0")
 
 
 def version(settings):
@@ -26,6 +26,10 @@ def has_inventory(settings):
 
 def has_expchecks(settings):
     return tuple(int(n) for n in version(settings)[1:].split(".")) >= (1, 5, 0)
+
+
+def has_kg(settings):
+    return tuple(int(n) for n in version(settings)[1:].split(".")) >= (1, 6, 0)
 
 
 def stage_schema(stage, settings):
