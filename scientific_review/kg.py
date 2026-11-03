@@ -1,6 +1,7 @@
 """Compact text rendering of an experiment knowledge graph (SEKG experiments.json and unresolved_issues.json) for the review prompts."""
 import hashlib
 import json
+import re
 from pathlib import Path
 from .common import digest
 
@@ -119,3 +120,45 @@ def render_kg(directory, max_chars):
     if dropped:
         result += '\n\n(trimmed to the character budget; ' + '; '.join(dropped) + ')'
     return result
+
+
+def figure_keys(text):
+    """Figure numbers named in a label or a panel record, as 'F1' or 'S2' for supplementary figures."""
+    keys = set()
+    low = text.replace('\u2013', '-')
+    for match in re.finditer(r'(supplement\w*\s+)?fig(?:ure)?s?\.?\s*((?:S?\d+[A-Za-z]?(?:\s*(?:,|;|&|-|and)\s*)?)+)', low, re.I):
+        supplementary = bool(match.group(1))
+        for part in re.finditer(r'(S?)(\d+)', match.group(2)):
+            keys.add(('S' if supplementary or part.group(1) else 'F') + part.group(2))
+    return keys
+
+
+def record_keys(record):
+    keys = set()
+    for panel in record.get('panels') or []:
+        keys |= figure_keys(str(panel.get('figure', '')))
+    return keys
+
+
+def render_kg_for_entry(directory, entry, max_chars):
+    """Excerpt of the graph for one inventory entry: records whose panels share a figure with the entry label, with the datasets they produce or consume."""
+    experiments_path, _ = kg_files(directory)
+    kg = json.loads(experiments_path.read_text())
+    wanted = figure_keys(entry.get('label', ''))
+    records = [r for r in kg.get('experiments', []) + kg.get('analyses', []) if wanted & record_keys(r)]
+    header = 'EXPERIMENT KNOWLEDGE GRAPH EXCERPT (independent extraction from this manuscript, matched by figure panel; descriptive, may contain errors)'
+    if not records:
+        names = [f"{r['id']} {r.get('name', '')}" for r in kg.get('experiments', []) + kg.get('analyses', [])]
+        return header + '\nNo graph record carries a panel of this experiment. Graph records: ' + '; '.join(names)[:max_chars - len(header) - 80]
+    ids = set()
+    for record in records:
+        for link in (record.get('consumes') or []) + (record.get('derived_from') or []):
+            ids.add(link.get('target') if isinstance(link, dict) else str(link))
+    datasets = [d for d in kg.get('datasets', []) if d['id'] in ids or (d.get('produced_by') or {}).get('target') in {r['id'] for r in records}]
+    parts = [header, ''] + [render_record(r) for r in records]
+    if datasets:
+        parts += ['', 'DATASETS'] + [render_dataset(d) for d in datasets]
+    text = '\n'.join(parts)
+    if len(text) > max_chars:
+        text = text[:max_chars].rsplit('\n', 1)[0] + '\n(excerpt trimmed to the character budget)'
+    return text

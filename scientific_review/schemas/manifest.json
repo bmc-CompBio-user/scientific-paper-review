@@ -108,6 +108,11 @@
           "type": "integer",
           "minimum": 5000,
           "maximum": 300000
+        },
+        "kg_check_chars": {
+          "type": "integer",
+          "minimum": 2000,
+          "maximum": 100000
         }
       }
     },

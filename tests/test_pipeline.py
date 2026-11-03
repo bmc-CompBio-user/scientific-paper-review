@@ -623,6 +623,62 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(normalized(payload('# Rubric 1.5.0', 'same')), normalized(payload('# Rubric 1.6.0', 'same')))
         self.assertNotEqual(normalized(payload('# Rubric 1.5.0', 'same')), normalized(payload('# Rubric 1.5.0', 'different')))
 
+    def test_figure_keys_and_graph_excerpt_by_panel(self):
+        from scientific_review.kg import figure_keys, render_kg_for_entry
+        self.assertEqual(figure_keys('Fig. 2A, 2B; fig. S2A'), {'F2', 'S2'})
+        self.assertEqual(figure_keys('Figures 1 and 2'), {'F1', 'F2'})
+        self.assertEqual(figure_keys('Supplemental Figure 3'), {'S3'})
+        directory = self.kg_fixture()
+        text = render_kg_for_entry(directory, {'label': 'Fig. 1A'}, 12000)
+        self.assertIn('EXP-001', text)
+        self.assertIn('DS-001 Growth data', text)
+        other = render_kg_for_entry(directory, {'label': 'Fig. 4'}, 12000)
+        self.assertIn('No graph record carries a panel', other)
+        self.assertIn('EXP-001 Culture growth assay', other)
+
+    def test_rubric_v170_gives_the_graph_only_to_the_checks_and_can_reuse_stages(self):
+        import re
+        def transport(host, route, payload=None, timeout=30):
+            if route == '/api/tags':
+                return {'models': [{'name': DEFAULTS['model'], 'digest': 'synthetic-digest'}]}
+            if route == '/api/version':
+                return {'version': 'synthetic'}
+            value = blank(payload['format'])
+            content = payload['messages'][1]['content']
+            if 'page_id' in value:
+                value['page_id'] = 'main.p001' if '"target_page": "main.p001"' in content else 'main.p002'
+            block = re.search(r'\[(main\.p\d+\.b\d+)\] [^\[]*?Three independent cultures per group', content)
+            if 'experiments' in value:
+                entry = blank(payload['format']['properties']['experiments']['items'])
+                entry.update(id='E1', label='Fig 1A', replicate_unit='independent_biological', hypothesis_timing='unclear',
+                             evidence=[{'source': block[1], 'quote': 'Three independent cultures per group', 'supports': 'N'}])
+                value['experiments'] = [entry]
+            if 'items' in value:
+                value['experiment_id'] = 'E1'
+            return {'done': True, 'done_reason': 'stop', 'message': {'content': json.dumps(value)}}
+        directory = self.kg_fixture()
+        config = read(self.manifest)
+        config['settings']['rubric'] = 'scientific-method-v1.5.0'
+        write(self.manifest, config)
+        patches = (patch('scientific_review.provider.http', transport), patch('scientific_review.pipeline.call', side_effect=lambda *a, **k: call(*a, **k, transport=transport)))
+        with patches[0], patches[1]:
+            base, errors = execute(self.manifest, 'base', self.root/'runs')
+            self.assertFalse(errors)
+            config['settings']['rubric'] = 'scientific-method-v1.7.0'
+            config['papers'][0]['kg_dir'] = str(directory)
+            write(self.manifest, config)
+            root, errors = execute(self.manifest, 'chk170', self.root/'runs', reuse_completed_from=base, reuse_also=('crosscheck', 'experiments'))
+            self.assertFalse(errors)
+            self.assertTrue((root/'papers/s1/crosscheck_job/reuse.json').exists())
+            self.assertTrue((root/'papers/s1/experiments_job/reuse.json').exists())
+            check_prompt = (root/'papers/s1/expcheck_jobs/01/attempt_001/prompt.txt').read_text()
+            self.assertIn('EXPERIMENT KNOWLEDGE GRAPH EXCERPT', check_prompt)
+            self.assertIn('Culture growth assay', check_prompt)
+            self.assertNotIn('KNOWLEDGE GRAPH', (root/'papers/s1/review_job/attempt_001/prompt.txt').read_text())
+            self.assertNotIn('KNOWLEDGE GRAPH', (base/'papers/s1/expcheck_jobs/01/attempt_001/prompt.txt').read_text())
+            self.assertFalse((root/'papers/s1/kg_context.txt').exists())
+            self.assertTrue((root/'papers/s1/expcheck_jobs/01.kg_excerpt.txt').exists())
+
     def test_caption_pattern_accepts_common_journal_styles(self):
         from scientific_review.pdf import CAPTION
         for text in ('Figure 1. Legend', 'Fig. 2: Legend', 'Fig. 3 | Legend', 'Figure S4 \u2014 Legend', 'Fig. 5 \u2013 Legend'):

@@ -1,0 +1,92 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "experiment_id": {
+      "type": "string"
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "item": {
+            "type": "string",
+            "enum": [
+              "unit_of_inference",
+              "replicate_independence",
+              "scale_and_model",
+              "reference_normalization",
+              "uncertainty_display",
+              "time_course_design",
+              "multiplicity_and_thresholds",
+              "representativity",
+              "controls_completeness",
+              "batch_and_confounding",
+              "negative_evidence",
+              "hypothesis_fit_and_scope"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "concern",
+              "not_assessable"
+            ]
+          },
+          "finding": {
+            "type": "string"
+          },
+          "consequence_for_claim": {
+            "type": "string"
+          },
+          "remedy": {
+            "type": "string",
+            "enum": [
+              "none",
+              "clarify_reporting",
+              "reanalyse",
+              "narrow_claim",
+              "add_experiment"
+            ]
+          },
+          "evidence": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "source": {
+                  "type": "string"
+                },
+                "quote": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "source",
+                "quote"
+              ]
+            }
+          }
+        },
+        "required": [
+          "item",
+          "status",
+          "finding",
+          "consequence_for_claim",
+          "remedy",
+          "evidence"
+        ]
+      }
+    }
+  },
+  "required": [
+    "experiment_id",
+    "items"
+  ]
+}

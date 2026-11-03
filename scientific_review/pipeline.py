@@ -6,10 +6,10 @@ from pathlib import Path
 import jsonschema
 import pymupdf
 from . import __version__
-from .common import PACKAGE, has_crosscheck, has_expchecks, has_inventory, has_kg, stage_prompt, digest, fingerprint, implementation_hash, lock, now, read, safe_id, write
+from .common import PACKAGE, has_crosscheck, has_expchecks, has_inventory, has_kg, kg_stages, stage_prompt, digest, fingerprint, implementation_hash, lock, now, read, safe_id, write
 from .config import load
 from .pdf import extract
-from .kg import kg_digest, render_kg
+from .kg import kg_digest, render_kg, render_kg_for_entry
 from .provider import call, identity
 from .reuse import import_page_job
 
@@ -196,14 +196,14 @@ def verify_experiments(result, sources):
     return {**result, 'experiments': [{**e, 'evidence': [{**q, 'quote_verified': verified(q)} for q in e['evidence']]} for e in result['experiments']]}
 
 
-def expcheck_prompt(entry, sources, settings):
+def expcheck_prompt(entry, sources, settings, kg=None):
     cited = {q['source'].rsplit('.', 1)[0] for q in entry['evidence']}
     clean = {k: v for k, v in entry.items() if k != 'evidence'}
     clean['evidence'] = [{'source': q['source'], 'quote': q['quote'], 'supports': q['supports']} for q in entry['evidence']]
     text, omitted = select_blocks(sources['pages'], settings['expcheck_text_chars'], lambda p: p['id'] in cited)
     methods, omitted_methods = method_context(sources, settings)
     return (stage_prompt('expcheck', settings) + '\n\nEXPERIMENT INVENTORY ENTRY\n' + json.dumps(clean, ensure_ascii=False) +
-            '\n\nORIGINAL TEXT OF THE CITED PAGES\n' + text + '\n\nORIGINAL METHODS CONTEXT\n' + methods), omitted + omitted_methods
+            '\n\nORIGINAL TEXT OF THE CITED PAGES\n' + text + '\n\nORIGINAL METHODS CONTEXT\n' + methods + ('\n\n' + kg if kg else '')), omitted + omitted_methods
 
 
 def verify_expchecks(result, sources):
@@ -318,7 +318,7 @@ def render_report(root):
     (root/'report.md').write_text('\n'.join(lines), encoding='utf-8')
 
 
-def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_jobs=None, retry_failed=False, reuse_completed_from=None):
+def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_jobs=None, retry_failed=False, reuse_completed_from=None, reuse_also=()):
     config = load(manifest)
     root = Path(runs).resolve()/safe_id(run_id)
     with lock(root):
@@ -329,11 +329,12 @@ def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_j
             if reuse_completed_from and str(Path(reuse_completed_from).resolve()) != saved:
                 raise ValueError('Reuse origin changed; choose a new run ID')
             reuse_completed_from = saved
+            reuse_also = tuple(read(plan_path).get('also', ()))
         elif reuse_completed_from:
             reuse_completed_from = str(Path(reuse_completed_from).resolve())
             if Path(reuse_completed_from) == root:
                 raise ValueError('Cannot import a run into itself')
-            write(plan_path, {'source_run': reuse_completed_from, 'created': now(),
+            write(plan_path, {'source_run': reuse_completed_from, 'created': now(), 'also': sorted(reuse_also),
                 'scope': 'Completed page calls only; exact context/model/images checked. Failed attempts remain at origin. Original output settings retained per imported call.'})
         papers = config['papers']
         if paper_ids:
@@ -381,6 +382,9 @@ def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_j
                         jobs += 1
                 if len(results) != len(sources['pages']):
                     continue
+                for name in reuse_also:  # stages whose completed calls are imported too; the request must match after normalization
+                    if reuse_completed_from:
+                        import_page_job(Path(reuse_completed_from)/'papers'/paper['id']/(name + '_job'), directory/(name + '_job'), reuse_completed_from)
                 crosscheck = None
                 if has_crosscheck(config['settings']):
                     prompt, omitted = crosscheck_prompt(sources, config['settings'])
@@ -389,15 +393,17 @@ def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_j
                     crosscheck = verify_quotes(found, sources)
                     write(directory/'crosscheck.json', crosscheck)
                     write(directory/'crosscheck_coverage.json', {'omitted_blocks': omitted})
+                kg_use = kg_stages(config['settings'])
                 kg = None
-                if has_kg(config['settings']):
+                if kg_use:
                     if not paper.get('kg_dir'):
-                        raise ValueError('Rubric 1.6.0 needs kg_dir for each paper in the manifest')
-                    kg = render_kg(paper['kg_dir'], config['settings']['kg_text_chars'])
-                    (directory/'kg_context.txt').write_text(kg, encoding='utf-8')
+                        raise ValueError('Rubric 1.6.0 and later need kg_dir for each paper in the manifest')
+                    if kg_use & {'experiments', 'review'}:
+                        kg = render_kg(paper['kg_dir'], config['settings']['kg_text_chars'])
+                        (directory/'kg_context.txt').write_text(kg, encoding='utf-8')
                 experiments = None
                 if has_inventory(config['settings']):
-                    prompt, omitted = experiments_prompt(sources, config['settings'], kg)
+                    prompt, omitted = experiments_prompt(sources, config['settings'], kg if 'experiments' in kg_use else None)
                     found = call(directory/'experiments_job', stage='experiments', prompt=prompt, images=[], source_ids=source_ids(sources),
                         settings=config['settings'], retry_failed=retry_failed)
                     experiments = verify_experiments(found, sources)
@@ -407,12 +413,16 @@ def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_j
                 if has_expchecks(config['settings']):
                     expchecks = []
                     for number, entry in enumerate(experiments['experiments'], 1):
-                        prompt, omitted = expcheck_prompt(entry, sources, config['settings'])
+                        excerpt = render_kg_for_entry(paper['kg_dir'], entry, config['settings']['kg_check_chars']) if 'expcheck' in kg_use else None
+                        prompt, omitted = expcheck_prompt(entry, sources, config['settings'], excerpt)
+                        if excerpt:
+                            (directory/'expcheck_jobs').mkdir(exist_ok=True)
+                            (directory/'expcheck_jobs'/f'{number:02d}.kg_excerpt.txt').write_text(excerpt, encoding='utf-8')
                         found = call(directory/'expcheck_jobs'/f'{number:02d}', stage='expcheck', prompt=prompt, images=[], source_ids=source_ids(sources),
                             settings=config['settings'], retry_failed=retry_failed)
                         expchecks.append({**verify_expchecks(found, sources), 'label': entry['label']})
                     write(directory/'expchecks.json', expchecks)
-                result = call(directory/'review_job', stage='review', prompt=review_prompt(sources, config['settings'], results, crosscheck, experiments, expchecks, kg),
+                result = call(directory/'review_job', stage='review', prompt=review_prompt(sources, config['settings'], results, crosscheck, experiments, expchecks, kg if 'review' in kg_use else None),
                     images=[], source_ids=source_ids(sources), settings=config['settings'], retry_failed=retry_failed)
                 write(directory/'review.json', result)
                 write(directory/'status.json', {'status': 'complete', 'ended': now(), 'pages': len(results), 'scientific_accuracy': 'unverified'})

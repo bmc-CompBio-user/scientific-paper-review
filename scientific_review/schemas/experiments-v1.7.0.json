@@ -1,0 +1,146 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "scope": {
+      "type": "string"
+    },
+    "experiments": {
+      "type": "array",
+      "maxItems": 40,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "claim_served": {
+            "type": "string"
+          },
+          "question_or_hypothesis": {
+            "type": "string"
+          },
+          "hypothesis_timing": {
+            "type": "string",
+            "enum": [
+              "prespecified",
+              "post_hoc_or_exploratory",
+              "unclear"
+            ]
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "measurement_principle": {
+            "type": "string"
+          },
+          "groups_and_conditions": {
+            "type": "string"
+          },
+          "replicate_unit": {
+            "type": "string",
+            "enum": [
+              "independent_biological",
+              "technical",
+              "lower_level_observations",
+              "unclear"
+            ]
+          },
+          "n_reported": {
+            "type": "string"
+          },
+          "representativity": {
+            "type": "string"
+          },
+          "controls": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "control": {
+                  "type": "string"
+                },
+                "alternative_addressed": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "control",
+                "alternative_addressed"
+              ]
+            }
+          },
+          "expected_controls_not_mentioned": {
+            "type": "array",
+            "maxItems": 6,
+            "items": {
+              "type": "string"
+            }
+          },
+          "statistics": {
+            "type": "string"
+          },
+          "information_not_stated": {
+            "type": "array",
+            "maxItems": 6,
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "source": {
+                  "type": "string"
+                },
+                "quote": {
+                  "type": "string"
+                },
+                "supports": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "source",
+                "quote",
+                "supports"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "claim_served",
+          "question_or_hypothesis",
+          "hypothesis_timing",
+          "endpoint",
+          "measurement_principle",
+          "groups_and_conditions",
+          "replicate_unit",
+          "n_reported",
+          "representativity",
+          "controls",
+          "expected_controls_not_mentioned",
+          "statistics",
+          "information_not_stated",
+          "evidence"
+        ]
+      }
+    }
+  },
+  "required": [
+    "scope",
+    "experiments"
+  ]
+}
