@@ -679,6 +679,99 @@ class PipelineTests(unittest.TestCase):
             self.assertFalse((root/'papers/s1/kg_context.txt').exists())
             self.assertTrue((root/'papers/s1/expcheck_jobs/01.kg_excerpt.txt').exists())
 
+    def test_numeric_gate_scope_flag_and_figure_pages(self):
+        from scientific_review.consistency import compare, numeric_gate, gate_crosscheck
+        from scientific_review.scope import scope_flag, absence_claim, coverage_statement
+        from scientific_review.figures import figure_pages
+        block = lambda i, text: {'id': i, 'text': text, 'bbox': [0, 0, 1, 1]}
+        sources = {'pages': [{'id': 'main.p001', 'document': 'main', 'role_hint': 'content', 'images': [], 'blocks': [block('main.p001.b000', 'Factor X inhibition led to increased accessibility at 4,688 peaks at a subset of regions in the genome.')]},
+                             {'id': 'main.p002', 'document': 'main', 'role_hint': 'figure_or_results', 'images': [], 'blocks': [block('main.p002.b000', 'In Factor X inhibited cells 4,125 peaks at a subset of regions with increased accessibility were gained.')]}]}
+        found = compare(sources)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]['tier'], 'code')
+        self.assertEqual({p['source'] for p in found[0]['passages']}, {'main.p001.b000', 'main.p002.b000'})
+        same = {'pages': [sources['pages'][0], {**sources['pages'][1], 'blocks': [block('main.p002.b000', 'In Factor X inhibited cells 4,688 peaks at a subset of regions with increased accessibility were gained.')]}]}
+        self.assertEqual(compare(same), [])
+        quotes = lambda a, b: {'passages': [{'source': 'x', 'quote': a}, {'source': 'y', 'quote': b}]}
+        self.assertTrue(numeric_gate(quotes('control group (n = 13)', 'controls (n = 30)')))
+        self.assertFalse(numeric_gate(quotes('control group (n = 13)', 'controls (n = 13)')))
+        self.assertFalse(numeric_gate(quotes('the control was NAC', 'the control was NAA')))
+        self.assertFalse(numeric_gate(quotes('cells were irradiated with 4 Gy', 'cells were irradiated')))
+        gated = gate_crosscheck({'checks': [{'relation': 'conflict', **quotes('n = 3', 'n = 4')}, {'relation': 'conflict', **quotes('NAC', 'NAA')}]})
+        self.assertEqual([c['relation'] for c in gated['checks']], ['numeric_difference'])
+        self.assertEqual(gated['dropped_non_numeric'], 1)
+        self.assertTrue(absence_claim('The exact time points are not stated in the text.'))
+        self.assertEqual(scope_flag({'finding': 'The exact time points are not stated in the text.'}), 'figure:time points')
+        self.assertEqual(scope_flag({'finding': 'The number of independent replicates is not stated.'}), '')
+        self.assertEqual(scope_flag({'finding': 'Cells were harvested at 4 h and 8 h.'}), '')
+        self.assertIn('not stated in this supplied text', coverage_statement(sources))
+        image = {'id': 'i', 'path': 'p.png'}
+        figures = figure_pages({'pages': [{'id': 'm.p1', 'images': [image], 'blocks': [block('b', 'Figure 2 | . CC-BY')], 'caption_candidates': []},
+                                          {'id': 'm.p2', 'images': [image], 'blocks': [block('c', 'Figure 3, a legend that begins with a comma. ' + 'x' * 600)], 'caption_candidates': []}]})
+        self.assertEqual(sorted(figures), ['F2', 'F3'])
+
+    def test_rubric_v180_checks_figures_and_gates_the_cross_check(self):
+        import re
+        answers = []
+        def transport(host, route, payload=None, timeout=30):
+            if route == '/api/tags':
+                return {'models': [{'name': DEFAULTS['model'], 'digest': 'synthetic-digest'}]}
+            if route == '/api/version':
+                return {'version': 'synthetic'}
+            value = blank(payload['format'])
+            content = payload['messages'][1]['content']
+            if 'page_id' in value:
+                value['page_id'] = 'main.p001' if '"target_page": "main.p001"' in content else 'main.p002'
+            block = re.search(r'\[(main\.p\d+\.b\d+)\] [^\[]*?Three independent cultures per group', content)
+            if 'checks' in value:
+                check = blank(payload['format']['properties']['checks']['items'])
+                one = {**check, 'id': 'c1', 'relation': 'conflict', 'passages': [{'source': block[1], 'quote': 'group size n = 13'}, {'source': block[1], 'quote': 'group size n = 30'}]}
+                two = {**check, 'id': 'c2', 'relation': 'conflict', 'passages': [{'source': block[1], 'quote': 'control NAC'}, {'source': block[1], 'quote': 'control NAA'}]}
+                value['checks'] = [one, two]
+            if 'experiments' in value:
+                entry = blank(payload['format']['properties']['experiments']['items'])
+                entry.update(id='E1', label='Fig 1', replicate_unit='independent_biological', hypothesis_timing='unclear',
+                             evidence=[{'source': block[1], 'quote': 'Three independent cultures per group', 'supports': 'N'}])
+                value['experiments'] = [entry]
+            if 'items' in value:
+                item = blank(payload['format']['properties']['items']['items'])
+                item.update(item='time_course_design', status='concern', remedy='clarify_reporting', finding='The exact time points of the readout are not stated.', consequence_for_claim='limited',
+                            evidence=[{'source': block[1], 'quote': 'Three independent cultures per group'}])
+                other = {**item, 'item': 'unit_of_inference', 'finding': 'The unit counted as N is not stated.'}
+                value.update(experiment_id='E1', items=[item, other])
+            if 'answer' in value:
+                self.assertTrue(payload['messages'][1]['images'])
+                self.assertIn('exact time points', content)
+                answers.append(1)
+                value.update(answer=ANSWER[0], visible_text='24 hours', panel='A')
+            return {'done': True, 'done_reason': 'stop', 'message': {'content': json.dumps(value)}}
+        ANSWER = ['visible']
+        config = read(self.manifest)
+        config['settings']['rubric'] = 'scientific-method-v1.8.0'
+        write(self.manifest, config)
+        patches = (patch('scientific_review.provider.http', transport), patch('scientific_review.pipeline.call', side_effect=lambda *a, **k: call(*a, **k, transport=transport)))
+        with patches[0], patches[1]:
+            root, errors = execute(self.manifest, 'fig', self.root/'runs')
+            self.assertFalse(errors)
+            checks = read(root/'papers/s1/expchecks.json')
+            flagged = [i for i in checks[0]['items'] if i.get('figure_check')]
+            self.assertEqual([i['item'] for i in flagged], ['time_course_design'])
+            self.assertEqual(flagged[0]['figure_check']['answer'], 'visible')
+            self.assertEqual(answers, [1])
+            prompt = (root/'papers/s1/review_job/attempt_001/prompt.txt').read_text()
+            concerns = prompt[prompt.index('PER-EXPERIMENT CHECKS'):prompt.index('SCOPE OF THIS REVIEW')]
+            self.assertNotIn('time_course_design', concerns)
+            self.assertIn('unit_of_inference', concerns)
+            self.assertIn('not stated in the supplied text', prompt)
+            cross = read(root/'papers/s1/crosscheck.json')
+            self.assertEqual([c['relation'] for c in cross['checks']], ['numeric_difference'])
+            self.assertEqual(cross['checks'][0]['tier'], 'model-proposed')
+            ANSWER[0] = 'not_visible'
+            root, errors = execute(self.manifest, 'fig2', self.root/'runs')
+            self.assertFalse(errors)
+            prompt = (root/'papers/s1/review_job/attempt_001/prompt.txt').read_text()
+            self.assertIn('"figure_check": "not_visible"', prompt)
+
     def test_caption_pattern_accepts_common_journal_styles(self):
         from scientific_review.pdf import CAPTION
         for text in ('Figure 1. Legend', 'Fig. 2: Legend', 'Fig. 3 | Legend', 'Figure S4 \u2014 Legend', 'Fig. 5 \u2013 Legend'):

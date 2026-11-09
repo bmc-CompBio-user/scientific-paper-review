@@ -6,10 +6,13 @@ from pathlib import Path
 import jsonschema
 import pymupdf
 from . import __version__
-from .common import PACKAGE, has_crosscheck, has_expchecks, has_inventory, has_kg, kg_stages, stage_prompt, digest, fingerprint, implementation_hash, lock, now, read, safe_id, write
+from .common import PACKAGE, has_crosscheck, has_expchecks, has_figcheck, has_inventory, has_kg, kg_stages, stage_prompt, digest, fingerprint, implementation_hash, lock, now, read, safe_id, write
 from .config import load
 from .pdf import extract
-from .kg import kg_digest, render_kg, render_kg_for_entry
+from .consistency import compare as numeric_compare, gate_crosscheck
+from .figures import figure_pages
+from .kg import figure_keys, kg_digest, render_kg, render_kg_for_entry
+from .scope import coverage_statement, scope_flag
 from .provider import call, identity
 from .reuse import import_page_job
 
@@ -211,9 +214,52 @@ def verify_expchecks(result, sources):
     return {**result, 'items': [{**i, 'evidence': [{**q, 'quote_verified': verified(q)} for q in i['evidence']]} for i in result['items']]}
 
 
+def figcheck_prompt(entry_label, item, settings):
+    return (stage_prompt('figcheck', settings) + '\n\nEXPERIMENT\n' + entry_label + '\n\nCLAIM MADE FROM THE TEXT ALONE (information said to be missing)\n' + item['finding'])
+
+
+def figure_images(figures, keys, directory):
+    """Image paths of the page(s) that show the figure(s): the page images of the first figure page, plus the full-page image of a second page."""
+    chosen = []
+    for key in sorted(keys):
+        pages = figures.get(key, [])
+        image_pages = [p for p in pages if len(' '.join(b['text'] for b in p['blocks']).strip()) < 450] or pages[:1]
+        for page in image_pages[:2]:
+            chosen.append(page)
+    paths = []
+    for index, page in enumerate(chosen[:2]):
+        for image in (page['images'] if index == 0 else page['images'][:1]):
+            paths.append(directory/'sources'/image['path'])
+    return paths, [p['id'] for p in chosen[:2]]
+
+
+def run_figchecks(expchecks, sources, settings, directory, retry_failed):
+    figures = figure_pages(sources)
+    for number, result in enumerate(expchecks, 1):
+        keys = figure_keys(result.get('label', ''))
+        for item in result['items']:
+            flag = scope_flag(item) if item['status'] == 'concern' else ''
+            if not flag:
+                continue
+            item['figure_scope'] = flag
+            paths, page_ids = figure_images(figures, keys, directory)
+            if not paths:
+                item['figure_check'] = {'answer': 'cannot_tell', 'visible_text': '', 'panel': 'no figure page found for ' + (', '.join(sorted(keys)) or 'this label')}
+                continue
+            answer = call(directory/'figcheck_jobs'/f"{number:02d}-{item['item']}", stage='figcheck', prompt=figcheck_prompt(result.get('label', ''), item, settings),
+                          images=paths, source_ids=source_ids(sources), settings=settings, retry_failed=retry_failed)
+            item['figure_check'] = {**answer, 'pages': page_ids}
+    return expchecks
+
+
+def answered_by_figure(item):
+    return (item.get('figure_check') or {}).get('answer') == 'visible'
+
+
 def reported_concerns(checks):
-    """Concerns first; ok items are kept in the file but not passed on."""
-    return [{'experiment_id': r['experiment_id'], 'label': r.get('label', ''), 'items': [i for i in r['items'] if i['status'] != 'ok']} for r in checks if any(i['status'] != 'ok' for i in r['items'])]
+    """Concerns first; ok items are kept in the file but not passed on; a concern the page image answers is not a concern."""
+    keep = lambda i: i['status'] != 'ok' and not answered_by_figure(i)
+    return [{'experiment_id': r['experiment_id'], 'label': r.get('label', ''), 'items': [i for i in r['items'] if keep(i)]} for r in checks if any(keep(i) for i in r['items'])]
 
 
 def inventory_for_review(experiments):
@@ -225,7 +271,8 @@ def concerns_for_review(checks):
     """Compact form for the review prompt: shortened text and, per quote, only the source block and the code verification result (the original text is in the same prompt)."""
     cut = lambda text, size: text if len(text) <= size else text[:size].rsplit(' ', 1)[0] + ' ...'
     return [{**r, 'items': [{'item': i['item'], 'status': i['status'], 'remedy': i['remedy'], 'finding': cut(i['finding'], 260), 'consequence_for_claim': cut(i['consequence_for_claim'], 160),
-                             'evidence': [{'source': q['source'], 'quote_verified': q['quote_verified']} for q in i['evidence']]} for i in r['items']]} for r in reported_concerns(checks)]
+                             'evidence': [{'source': q['source'], 'quote_verified': q['quote_verified']} for q in i['evidence']],
+                             **({'figure_check': i['figure_check']['answer']} if i.get('figure_check') else {})} for i in r['items']]} for r in reported_concerns(checks)]
 
 
 def review_prompt(sources, settings, pages, crosscheck=None, experiments=None, expchecks=None, kg=None):
@@ -241,6 +288,8 @@ def review_prompt(sources, settings, pages, crosscheck=None, experiments=None, e
         required += '\n\nPER-EXPERIMENT CHECKS (MODEL OUTPUT; only concerns and not_assessable items are listed, text shortened; quote_verified is set by code against the quoted passage, which is not repeated here)\n' + json.dumps(concerns_for_review(expchecks), ensure_ascii=False)
     if kg is not None:
         required += '\n\n' + kg
+    if has_figcheck(settings):
+        required += '\n\nSCOPE OF THIS REVIEW\n' + coverage_statement(sources) + ' State every absence finding as not stated in the supplied text and say what was searched.'
     if len(required) > settings['review_text_chars']:
         raise ValueError('Mandatory review context exceeds review_text_chars. No evidence silently dropped; use a new protocol with a larger context budget')
     original, omitted_original = select_blocks(sources['pages'], settings['review_text_chars']-len(required), lambda p: p['role_hint'] not in {'references_candidate', 'resources'})
@@ -276,7 +325,8 @@ def render_report(root):
             cross = read(cross_path)
             lines.extend(['### Cross-check of passages', '', 'Quotes are marked by code as found verbatim in the cited block (verified) or not (unverified).', ''])
             for check in reported_checks(cross):
-                lines.extend([f"- [{check['relation']}] {check['category']}: {check['topic']}. {check['explanation']} Consequence: {check['consequence']}"] +
+                tier = f" ({check['tier']})" if check.get('tier') else ''
+                lines.extend([f"- [{check['relation']}{tier}] {check['category']}: {check['topic']}. {check['explanation']} Consequence: {check['consequence']}"] +
                     [f"  - {'verified' if p['quote_verified'] else 'UNVERIFIED'} {p['source']}: {p['quote']}" for p in check['passages']] + [''])
             set_aside = sum(1 for c in cross['checks'] if c.get('declared_consistent'))
             if set_aside:
@@ -302,10 +352,16 @@ def render_report(root):
         checks_path = directory/'expchecks.json'
         if checks_path.exists():
             lines.extend(['### Per-experiment checks', '', 'Concerns and items that could not be assessed; ok items are in expchecks.json. Quotes are marked verified or UNVERIFIED by code.', ''])
+            sources_path = directory/'sources'/'sources.json'
+            if sources_path.exists() and any(i.get('figure_scope') for r in read(checks_path) for i in r['items']):
+                lines.extend(['Coverage: ' + coverage_statement(read(sources_path)), ''])
             for r in reported_concerns(read(checks_path)):
                 lines.append(f"- {r['experiment_id']} [{r['label']}]")
                 for i in r['items']:
-                    lines.append(f"  - {i['item']} ({i['status']}; remedy: {i['remedy']}): {i['finding']} Consequence: {i['consequence_for_claim']}")
+                    shown = ''
+                    if i.get('figure_check'):
+                        shown = f" [checked against the page image of the figure: {i['figure_check']['answer'].replace('_', ' ')}]"
+                    lines.append(f"  - {i['item']} ({i['status']}; remedy: {i['remedy']}): {i['finding']} Consequence: {i['consequence_for_claim']}{shown}")
                     lines.extend(f"    - {'verified' if q['quote_verified'] else 'UNVERIFIED'} {q['source']}: {q['quote']}" for q in i['evidence'])
                 lines.append('')
         for key in ('hypotheses', 'scientific_practice', 'claim_measurement_links', 'reporting_and_statistics', 'triangulation', 'validation_gaps'):
@@ -391,6 +447,11 @@ def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_j
                     found = call(directory/'crosscheck_job', stage='crosscheck', prompt=prompt, images=[], source_ids=source_ids(sources),
                         settings=config['settings'], retry_failed=retry_failed)
                     crosscheck = verify_quotes(found, sources)
+                    if has_figcheck(config['settings']):
+                        verify = quote_checker(sources)
+                        crosscheck = gate_crosscheck(crosscheck)
+                        code_items = [{**c, 'passages': [{**q, 'quote_verified': verify(q)} for q in c['passages']]} for c in numeric_compare(sources)]
+                        crosscheck = {**crosscheck, 'checks': code_items + crosscheck['checks']}
                     write(directory/'crosscheck.json', crosscheck)
                     write(directory/'crosscheck_coverage.json', {'omitted_blocks': omitted})
                 kg_use = kg_stages(config['settings'])
@@ -421,6 +482,8 @@ def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_j
                         found = call(directory/'expcheck_jobs'/f'{number:02d}', stage='expcheck', prompt=prompt, images=[], source_ids=source_ids(sources),
                             settings=config['settings'], retry_failed=retry_failed)
                         expchecks.append({**verify_expchecks(found, sources), 'label': entry['label']})
+                    if has_figcheck(config['settings']):
+                        expchecks = run_figchecks(expchecks, sources, config['settings'], directory, retry_failed)
                     write(directory/'expchecks.json', expchecks)
                 result = call(directory/'review_job', stage='review', prompt=review_prompt(sources, config['settings'], results, crosscheck, experiments, expchecks, kg if 'review' in kg_use else None),
                     images=[], source_ids=source_ids(sources), settings=config['settings'], retry_failed=retry_failed)

@@ -32,7 +32,7 @@ def identity(settings):
     return {'ollama': http(settings['host'], '/api/version'), 'model': matches[0]}
 
 
-LENGTH_CAPPED_STAGES = {'crosscheck', 'experiments', 'expcheck'}
+LENGTH_CAPPED_STAGES = {'crosscheck', 'experiments', 'expcheck', 'figcheck'}
 STRING_CAPS = {'quote': 300, 'explanation': 900, 'consequence': 400, 'topic': 200, 'label': 200, 'id': 40, 'source': 60}
 DEFAULT_STRING_CAP = 700
 

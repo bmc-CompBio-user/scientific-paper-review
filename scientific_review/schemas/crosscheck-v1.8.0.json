@@ -1,0 +1,96 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "scope": {
+      "type": "string"
+    },
+    "checks": {
+      "type": "array",
+      "maxItems": 15,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "threshold_or_cutoff",
+              "sample_size_or_replicates",
+              "amount_dose_or_duration",
+              "matched_controls_or_normalization",
+              "test_software_or_parameters",
+              "text_vs_legend_or_figure_claim",
+              "wording_vs_data",
+              "terminology",
+              "other"
+            ]
+          },
+          "topic": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string",
+            "enum": [
+              "conflict",
+              "possible_conflict",
+              "ambiguity"
+            ]
+          },
+          "passages": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "source": {
+                  "type": "string"
+                },
+                "quote": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "source",
+                "quote"
+              ]
+            }
+          },
+          "explanation": {
+            "type": "string"
+          },
+          "consequence": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "category",
+          "topic",
+          "relation",
+          "passages",
+          "explanation",
+          "consequence"
+        ]
+      }
+    },
+    "not_checked": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "scope",
+    "checks",
+    "not_checked"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

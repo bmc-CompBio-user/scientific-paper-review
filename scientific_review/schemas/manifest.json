@@ -113,6 +113,11 @@
           "type": "integer",
           "minimum": 2000,
           "maximum": 100000
+        },
+        "figcheck_num_predict": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 8000
         }
       }
     },
