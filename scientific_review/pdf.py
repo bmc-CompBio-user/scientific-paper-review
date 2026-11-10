@@ -24,6 +24,33 @@ def role(text, index):
     return "content"
 
 
+def furniture(pdf):
+    """Normalized texts of running headers, footers and margin text: short blocks in a page margin that recur on at least a third of the pages."""
+    if len(pdf) < 4:
+        return set()
+    counts = {}
+    for page in pdf:
+        height, width = page.rect.height, page.rect.width
+        seen = set()
+        for b in page.get_text("blocks", sort=True):
+            if b[6] != 0 or not b[4].strip():
+                continue
+            margin = b[1] < 0.12 * height or b[3] > 0.88 * height or b[2] < 0.07 * width or b[0] > 0.93 * width
+            key = re.sub(r"\s+", " ", re.sub(r"\d+", "#", b[4])).strip().lower()
+            if margin and key and len(key) <= 700 and key not in seen:
+                seen.add(key)
+                counts[key] = counts.get(key, 0) + 1
+    need = max(3, -(-len(pdf) // 3))
+    return {key for key, n in counts.items() if n >= need}
+
+
+def is_furniture(block, page, repeated):
+    height, width = page.rect.height, page.rect.width
+    margin = block[1] < 0.12 * height or block[3] > 0.88 * height or block[2] < 0.07 * width or block[0] > 0.93 * width
+    key = re.sub(r"\s+", " ", re.sub(r"\d+", "#", block[4])).strip().lower()
+    return margin and key in repeated
+
+
 def extract(paper, folder, settings):
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
@@ -53,11 +80,16 @@ def extract(paper, folder, settings):
             if pdf.embfile_count():
                 result["warnings"].append({"document": doc["id"], "kind": "embedded_files_not_extracted",
                     "files": pdf.embfile_names()})
+            repeated = furniture(pdf)
+            removed = {}
             for n, page in enumerate(pdf, 1):
                 prefix = f"{doc['id']}.p{n:03d}"
                 blocks = []
                 for b in page.get_text("blocks", sort=True):
                     if b[6] == 0 and b[4].strip():
+                        if is_furniture(b, page, repeated):
+                            removed[" ".join(b[4].split())[:120]] = removed.get(" ".join(b[4].split())[:120], 0) + 1
+                            continue
                         blocks.append({"id": f"{prefix}.b{len(blocks):03d}", "text": b[4].strip(), "bbox": list(b[:4])})
                 text = "\n\n".join(b["text"] for b in blocks)
                 text_path = Path("text") / f"{prefix}.txt"
@@ -91,5 +123,8 @@ def extract(paper, folder, settings):
                     "figure_mentions": [{"source": b["id"], "label": "Figure " + m[1].upper()} for b in blocks for m in FIGURE.finditer(b["text"])]})
                 if len(text.strip()) < 100:
                     result["warnings"].append({"page": prefix, "kind": "little_text_no_ocr", "image_supplied": True})
+            if removed:
+                result["warnings"].append({"document": doc["id"], "kind": "running_header_footer_removed",
+                    "examples": [[text, count] for text, count in sorted(removed.items(), key=lambda kv: -kv[1])[:5]]})
     write(manifest_path, result)
     return result

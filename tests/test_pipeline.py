@@ -772,6 +772,45 @@ class PipelineTests(unittest.TestCase):
             prompt = (root/'papers/s1/review_job/attempt_001/prompt.txt').read_text()
             self.assertIn('"figure_check": "not_visible"', prompt)
 
+    def test_running_headers_and_footers_are_removed_but_body_text_stays(self):
+        path = self.root/'journal.pdf'
+        document = pymupdf.open()
+        for number in range(1, 7):
+            page = document.new_page(width=400, height=500)
+            page.insert_text((20, 18), 'bioRxiv preprint doi: https://doi.org/10.1101/2025.01.01.000001; this version posted July %d, 2025.' % number, fontsize=6)
+            page.insert_textbox((30, 60, 370, 420), 'Body paragraph %d describes the experiment and states n = %d independent cultures per group.' % (number, number + 2), fontsize=11)
+            page.insert_text((190, 480), str(number), fontsize=9)
+        document.save(path)
+        document.close()
+        sources = extract({'documents': [{'id': 'main', 'path': str(path), 'method_pages': []}]}, self.root/'src', {**DEFAULTS, 'dpi': 50, 'tiles': False})
+        texts = [b['text'] for p in sources['pages'] for b in p['blocks']]
+        self.assertTrue(all('bioRxiv' not in t for t in texts))
+        self.assertTrue(all(not t.strip().isdigit() for t in texts))
+        self.assertEqual(sum('Body paragraph' in t for t in texts), 6)
+        self.assertIn('running_header_footer_removed', [w['kind'] for w in sources['warnings']])
+        short = self.root/'short.pdf'
+        one = pymupdf.open(); page = one.new_page(width=400, height=500); page.insert_text((20, 18), 'Header', fontsize=6); page.insert_textbox((30, 60, 370, 420), 'Only page.', fontsize=11); one.save(short); one.close()
+        kept = extract({'documents': [{'id': 'main', 'path': str(short), 'method_pages': []}]}, self.root/'src2', {**DEFAULTS, 'dpi': 50, 'tiles': False})
+        self.assertIn('Header', ' '.join(b['text'] for p in kept['pages'] for b in p['blocks']))
+
+    def test_recurring_issues_are_grouped_across_experiments_and_legends_are_found(self):
+        from scientific_review.aggregate import recurring_issues
+        from scientific_review.figures import legend_text
+        from scientific_review.scope import scope_flag
+        item = lambda name, finding: {'item': name, 'status': 'concern', 'finding': finding, 'evidence': [], 'remedy': 'clarify_reporting', 'consequence_for_claim': ''}
+        checks = [{'experiment_id': f'E{n}', 'label': f'Fig {n}', 'items': [item('unit_of_inference', f'The data were compiled from {n + 1} experiments but the model does not say whether experiment was a factor.'), item('uncertainty_display', f'Error bars in panel {n} are not defined.')]} for n in range(1, 5)]
+        groups, rest = recurring_issues(checks)
+        self.assertTrue(any('compiled' in g['theme'] and len(g['labels']) == 4 for g in groups))
+        self.assertEqual(sum(len(g['items']) for g in groups) + len(rest), 8)
+        answered = [{'experiment_id': 'E9', 'label': 'Fig 9', 'items': [{**item('unit_of_inference', 'The data were compiled from 2 experiments and so on.'), 'figure_check': {'answer': 'visible'}}]}]
+        self.assertEqual(recurring_issues(answered), ([], []))
+        block = lambda i, text: {'id': i, 'text': text}
+        sources = {'pages': [{'blocks': [block('b0', 'Figure 2. Growth of cells.'), block('b1', '(A) Bars show the mean and SD of three experiments.'), block('b2', 'Figure 3. Another legend.'), block('b3', 'Different text.')]}]}
+        text = legend_text(sources, {'F2'})
+        self.assertIn('Bars show the mean and SD', text)
+        self.assertNotIn('Different text', text)
+        self.assertEqual(scope_flag({'finding': 'The specific days post-transfer for each category are not stated.'}), 'figure:time points')
+
     def test_caption_pattern_accepts_common_journal_styles(self):
         from scientific_review.pdf import CAPTION
         for text in ('Figure 1. Legend', 'Fig. 2: Legend', 'Fig. 3 | Legend', 'Figure S4 \u2014 Legend', 'Fig. 5 \u2013 Legend'):

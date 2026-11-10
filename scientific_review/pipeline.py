@@ -9,8 +9,9 @@ from . import __version__
 from .common import PACKAGE, has_crosscheck, has_expchecks, has_figcheck, has_inventory, has_kg, kg_stages, stage_prompt, digest, fingerprint, implementation_hash, lock, now, read, safe_id, write
 from .config import load
 from .pdf import extract
+from .aggregate import recurring_issues
 from .consistency import compare as numeric_compare, gate_crosscheck
-from .figures import figure_pages
+from .figures import figure_pages, legend_text
 from .kg import figure_keys, kg_digest, render_kg, render_kg_for_entry
 from .scope import coverage_statement, scope_flag
 from .provider import call, identity
@@ -205,8 +206,12 @@ def expcheck_prompt(entry, sources, settings, kg=None):
     clean['evidence'] = [{'source': q['source'], 'quote': q['quote'], 'supports': q['supports']} for q in entry['evidence']]
     text, omitted = select_blocks(sources['pages'], settings['expcheck_text_chars'], lambda p: p['id'] in cited)
     methods, omitted_methods = method_context(sources, settings)
+    legends = ''
+    if has_figcheck(settings):
+        legend = legend_text(sources, figure_keys(entry.get('label', '')))
+        legends = '\n\nFIGURE LEGEND(S) OF THIS EXPERIMENT (original text)\n' + legend if legend else ''
     return (stage_prompt('expcheck', settings) + '\n\nEXPERIMENT INVENTORY ENTRY\n' + json.dumps(clean, ensure_ascii=False) +
-            '\n\nORIGINAL TEXT OF THE CITED PAGES\n' + text + '\n\nORIGINAL METHODS CONTEXT\n' + methods + ('\n\n' + kg if kg else '')), omitted + omitted_methods
+            '\n\nORIGINAL TEXT OF THE CITED PAGES\n' + text + '\n\nORIGINAL METHODS CONTEXT\n' + methods + legends + ('\n\n' + kg if kg else '')), omitted + omitted_methods
 
 
 def verify_expchecks(result, sources):
@@ -250,6 +255,9 @@ def run_figchecks(expchecks, sources, settings, directory, retry_failed):
                           images=paths, source_ids=source_ids(sources), settings=settings, retry_failed=retry_failed)
             item['figure_check'] = {**answer, 'pages': page_ids}
     return expchecks
+
+
+JUDGEMENT_ASPECTS = {'hypothesis_fit_and_scope', 'controls_completeness'}
 
 
 def answered_by_figure(item):
@@ -355,7 +363,25 @@ def render_report(root):
             sources_path = directory/'sources'/'sources.json'
             if sources_path.exists() and any(i.get('figure_scope') for r in read(checks_path) for i in r['items']):
                 lines.extend(['Coverage: ' + coverage_statement(read(sources_path)), ''])
-            for r in reported_concerns(read(checks_path)):
+            groups, rest = recurring_issues(read(checks_path))
+            if groups:
+                lines.extend([f"Recurring issues ({sum(len(g['items']) for g in groups)} concerns in {len(groups)} groups; the remaining concerns follow by experiment):", ''])
+                for g in groups:
+                    best = min((i for i in g['items'] if any(q['quote_verified'] for q in i['evidence'])), key=lambda i: len(i['finding']), default=g['items'][0])
+                    lines.append(f"- {g['theme']} ({len(g['items'])} concerns in {len(g['labels'])} experiments; aspects: {', '.join(g['aspects'])})")
+                    lines.append(f"  - affects: {'; '.join(g['labels'])}")
+                    lines.append(f"  - example ({best['label']}): {best['finding']}")
+                    lines.extend(f"    - {'verified' if q['quote_verified'] else 'UNVERIFIED'} {q['source']}: {q['quote']}" for q in best['evidence'][:2])
+                lines.append('')
+            by_experiment = {}
+            judgement = []
+            for entry in rest:
+                if entry['item']['item'] in JUDGEMENT_ASPECTS:
+                    judgement.append(entry)
+                else:
+                    by_experiment.setdefault((entry['experiment_id'], entry['label']), []).append(entry['item'])
+            for (experiment_id, label), items in by_experiment.items():
+                r = {'experiment_id': experiment_id, 'label': label, 'items': items}
                 lines.append(f"- {r['experiment_id']} [{r['label']}]")
                 for i in r['items']:
                     shown = ''
@@ -363,6 +389,11 @@ def render_report(root):
                         shown = f" [checked against the page image of the figure: {i['figure_check']['answer'].replace('_', ' ')}]"
                     lines.append(f"  - {i['item']} ({i['status']}; remedy: {i['remedy']}): {i['finding']} Consequence: {i['consequence_for_claim']}{shown}")
                     lines.extend(f"    - {'verified' if q['quote_verified'] else 'UNVERIFIED'} {q['source']}: {q['quote']}" for q in i['evidence'])
+                lines.append('')
+            if judgement:
+                lines.extend(['Suggestions (judgement about scope or controls; rated less reliable by the reviewer, shown separately):', ''])
+                for entry in judgement:
+                    lines.append(f"- [{entry['label']}] {entry['item']['item']}: {entry['item']['finding']}")
                 lines.append('')
         for key in ('hypotheses', 'scientific_practice', 'claim_measurement_links', 'reporting_and_statistics', 'triangulation', 'validation_gaps'):
             if key not in review:

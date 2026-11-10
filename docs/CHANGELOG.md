@@ -1,5 +1,9 @@
 # Changes
 
+## Running headers, repeated problems, legends (apply from rubric 1.8.0 on, header filter for all rubrics)
+
+Prompted by the second rating sheet. (1) Extraction removes running headers, footers, page numbers and margin text: short blocks in a page margin whose text, with digits masked, recurs on at least a third of the pages (at least three) of a document with four or more pages. This removes the bioRxiv licence header that had ended up inside text chunks. Removed examples are listed in the extraction warnings (`running_header_footer_removed`); the block IDs of a new extraction differ from earlier extractions of the same file. (2) The report groups per-experiment concerns that repeat one issue (a phrase of three to four content words shared by concerns of at least three experiments, for example data compiled from several experiments) into one entry that names the affected experiments and aspects and gives one example with its quotes; ungrouped concerns follow by experiment, and the full list stays in `expchecks.json`. Concerns about the scope of a conclusion or the completeness of controls (aspects rated less reliable) are shown in a separate suggestions block. (3) The per-experiment checks of rubric 1.8.0 receive the legend of the experiment's figure(s), and the figure-borne pattern covers days and hours after a treatment.
+
 ## Rubric 1.8.0 (prototype, opt-in): precision-first cross-check and figure-scope check
 
 Motivated by a rating of 60 findings by the owner of the reviews (precision of the cross-check conflicts 25 percent strict, of per-experiment checks 67 percent; the errors were differences that are not conflicts and information that sits in figure panels). Same stages as 1.5.0 with three changes.

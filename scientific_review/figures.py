@@ -31,3 +31,21 @@ def figure_pages(sources):
                 else:
                     add(key, page)
     return result
+
+
+def legend_text(sources, keys, limit=4500):
+    """Text of the legend(s) of the named figures: the caption block and the blocks that follow it up to the next caption or the end of the page."""
+    out = []
+    caption = re.compile(r'\s*(?:Figure|Fig\.)\s*S?\d+\s*[,.:|]', re.I)
+    for page in sources['pages']:
+        blocks = page['blocks']
+        for index, block in enumerate(blocks):
+            if caption.match(block['text']) and figure_number(block['text']) in keys:
+                parts = [f"[{block['id']}] {block['text']}"]
+                for follower in blocks[index + 1:]:
+                    if caption.match(follower['text']):
+                        break
+                    parts.append(f"[{follower['id']}] {follower['text']}")
+                out.append('\n'.join(parts))
+    text = '\n\n'.join(out)
+    return text[:limit]
