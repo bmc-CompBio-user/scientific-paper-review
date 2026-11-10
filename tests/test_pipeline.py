@@ -787,6 +787,7 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(all('bioRxiv' not in t for t in texts))
         self.assertTrue(all(not t.strip().isdigit() for t in texts))
         self.assertEqual(sum('Body paragraph' in t for t in texts), 6)
+        self.assertEqual('transcripƟonal'.replace('\u019f', 'ti'), 'transcriptional')
         self.assertIn('running_header_footer_removed', [w['kind'] for w in sources['warnings']])
         short = self.root/'short.pdf'
         one = pymupdf.open(); page = one.new_page(width=400, height=500); page.insert_text((20, 18), 'Header', fontsize=6); page.insert_textbox((30, 60, 370, 420), 'Only page.', fontsize=11); one.save(short); one.close()

@@ -90,7 +90,7 @@ def extract(paper, folder, settings):
                         if is_furniture(b, page, repeated):
                             removed[" ".join(b[4].split())[:120]] = removed.get(" ".join(b[4].split())[:120], 0) + 1
                             continue
-                        blocks.append({"id": f"{prefix}.b{len(blocks):03d}", "text": b[4].strip(), "bbox": list(b[:4])})
+                        blocks.append({"id": f"{prefix}.b{len(blocks):03d}", "text": b[4].strip().replace("\u019f", "ti"), "bbox": list(b[:4])})  # some fonts encode the ti ligature as this letter
                 text = "\n\n".join(b["text"] for b in blocks)
                 text_path = Path("text") / f"{prefix}.txt"
                 (folder / text_path).parent.mkdir(exist_ok=True)
