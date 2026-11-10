@@ -9,11 +9,12 @@ from . import __version__
 from .common import PACKAGE, has_crosscheck, has_expchecks, has_figcheck, has_inventory, has_kg, kg_stages, stage_prompt, digest, fingerprint, implementation_hash, lock, now, read, safe_id, write
 from .config import load
 from .pdf import extract
-from .aggregate import recurring_issues
+from .aggregate import recurring_issues, representative
 from .consistency import compare as numeric_compare, gate_crosscheck
 from .figures import figure_pages, legend_text
 from .kg import figure_keys, kg_digest, render_kg, render_kg_for_entry
 from .scope import coverage_statement, scope_flag
+from .scorecard import executive_summary
 from .provider import call, identity
 from .reuse import import_page_job
 
@@ -367,7 +368,7 @@ def render_report(root):
             if groups:
                 lines.extend([f"Recurring issues ({sum(len(g['items']) for g in groups)} concerns in {len(groups)} groups; the remaining concerns follow by experiment):", ''])
                 for g in groups:
-                    best = min((i for i in g['items'] if any(q['quote_verified'] for q in i['evidence'])), key=lambda i: len(i['finding']), default=g['items'][0])
+                    best = representative(g)
                     lines.append(f"- {g['theme']} ({len(g['items'])} concerns in {len(g['labels'])} experiments; aspects: {', '.join(g['aspects'])})")
                     lines.append(f"  - affects: {'; '.join(g['labels'])}")
                     lines.append(f"  - example ({best['label']}): {best['finding']}")
@@ -404,6 +405,22 @@ def render_report(root):
                 lines.extend(['- ' + '; '.join(f'{k}: {json.dumps(v, ensure_ascii=False) if isinstance(v, list) else v}' for k, v in item.items()), ''])
         lines.extend(['### Context limitations', ''] + ['- ' + item for item in review['context_limitations']] + [''])
     (root/'report.md').write_text('\n'.join(lines), encoding='utf-8')
+
+
+def write_summaries(root):
+    """One executive_summary.md per completed paper of a run that has per-experiment checks."""
+    written = []
+    root = Path(root)
+    for pid, paper in read(root/'cohort.json').items():
+        directory = root/'papers'/pid
+        if not ((directory/'expchecks.json').exists() and (directory/'review.json').exists()):
+            continue
+        source = f"Source: {', '.join(d['id'] + ' (' + Path(d['path']).name + ')' for d in paper['documents'])}; protocol rubric {read(root/'protocol.json')['protocol']['settings']['rubric'].rsplit('-', 1)[1]}."
+        text, scored = executive_summary(pid, paper.get('title', pid), source, read(directory/'expchecks.json'), read(directory/'review.json'), coverage_statement(read(directory/'sources'/'sources.json')))
+        (directory/'executive_summary.md').write_text(text, encoding='utf-8')
+        write(directory/'scores.json', {k: {'score': v['score'], 'basis': v.get('basis'), 'drivers': [[a, p] for a, p in v['drivers']]} for k, v in scored.items()})
+        written.append(directory/'executive_summary.md')
+    return written
 
 
 def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_jobs=None, retry_failed=False, reuse_completed_from=None, reuse_also=()):

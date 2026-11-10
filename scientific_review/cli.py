@@ -26,6 +26,8 @@ def main(argv=None):
     p.add_argument('manifest')
     p = sub.add_parser('report')
     p.add_argument('run_root')
+    p = sub.add_parser('summary')
+    p.add_argument('run_root')
     p = sub.add_parser('evaluate')
     p.add_argument('annotations')
     p.add_argument('run_root')
@@ -40,6 +42,10 @@ def main(argv=None):
         elif args.command == 'report':
             render_report(Path(args.run_root))
             print(str(Path(args.run_root)/'report.md'))
+        elif args.command == 'summary':
+            from .pipeline import write_summaries
+            for path in write_summaries(Path(args.run_root)):
+                print(path)
         elif args.command == 'evaluate':
             result = evaluate(args.annotations, args.run_root, args.output, args.minimum_studies)
             print(json.dumps({'annotations': result['annotation_count'], 'families': result['families']}, indent=2))

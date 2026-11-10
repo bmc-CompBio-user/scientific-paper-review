@@ -51,3 +51,13 @@ def recurring_issues(checks, min_support=3):
         remaining = [i for i in remaining if i not in members]
     rest = [{'experiment_id': concerns[i]['experiment_id'], 'label': concerns[i]['label'], 'item': concerns[i]['item']} for i in remaining]
     return groups, rest
+
+
+def representative(group):
+    """The group's concern that contains the most words of the theme phrase; shorter wins a tie, a verified quote breaks a further tie."""
+    theme = set(group['theme'].split()) - {'#'}
+    def key(item):
+        words = set(tokens(item['finding']))
+        verified = any(q.get('quote_verified') for q in item.get('evidence', []))
+        return (-len(theme & words), 0 if verified else 1, len(item['finding']))
+    return min(group['items'], key=key)

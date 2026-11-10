@@ -813,6 +813,24 @@ class PipelineTests(unittest.TestCase):
         self.assertNotIn('Different text', text)
         self.assertEqual(scope_flag({'finding': 'The specific days post-transfer for each category are not stated.'}), 'figure:time points')
 
+    def test_scorecard_scores_follow_the_findings(self):
+        from scientific_review.scorecard import scores, half, executive_summary
+        item = lambda name, status='concern': {'item': name, 'status': status, 'finding': 'x', 'evidence': []}
+        many = [{'experiment_id': f'E{n}', 'label': f'Fig {n}', 'items': [item('unit_of_inference'), item('scale_and_model', 'ok')]} for n in range(4)]
+        none = [{'experiment_id': f'E{n}', 'label': f'Fig {n}', 'items': [item('unit_of_inference', 'ok')]} for n in range(4)]
+        review = {'major_claims': [{'id': 'claim_1', 'evidence_strength': 'strong', 'authors_claim': 'A claim.'}, {'id': 'claim_2', 'evidence_strength': 'weak', 'authors_claim': 'B claim.'}],
+                  'claim_measurement_links': [{'claim_id': 'claim_1', 'link_status': 'directly_shown'}], 'validation_gaps': [{'claim_id': 'claim_2', 'priority': 'essential_for_claim'}],
+                  'reporting_and_statistics': [{'aspect': 'data_availability', 'status': 'not_found_in_reviewed_material'}], 'overall_assessment': 'x.'}
+        worse, better = scores(many, review), scores(none, review)
+        self.assertLess(worse['experimental design']['score'], better['experimental design']['score'])
+        self.assertEqual(worse['reporting']['score'], better['reporting']['score'])
+        self.assertEqual(worse['evidence strength']['score'], half(5 * (1.0 + 0.15) / 2))
+        self.assertTrue(all(0 <= v['score'] <= 5 and v['score'] * 2 == int(v['score'] * 2) for v in worse.values()))
+        text, _ = executive_summary('p1', 'Title', 'Source.', many, review, 'Coverage.')
+        self.assertIn('| experimental design |', text)
+        self.assertIn('A claim.', text)
+        self.assertIn('not a judgement of the biology', text)
+
     def test_caption_pattern_accepts_common_journal_styles(self):
         from scientific_review.pdf import CAPTION
         for text in ('Figure 1. Legend', 'Fig. 2: Legend', 'Fig. 3 | Legend', 'Figure S4 \u2014 Legend', 'Fig. 5 \u2013 Legend'):
