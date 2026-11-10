@@ -386,7 +386,8 @@ def render_report(root):
                 for i in r['items']:
                     shown = ''
                     if i.get('figure_check'):
-                        shown = f" [checked against the page image of the figure: {i['figure_check']['answer'].replace('_', ' ')}]"
+                        seen = i['figure_check'].get('visible_text', '').strip()
+                        shown = f" [checked against the page image of the figure: {i['figure_check']['answer'].replace('_', ' ')}" + (f"; text visible in the figure: {seen[:200]}" if seen else '') + ']'
                     lines.append(f"  - {i['item']} ({i['status']}; remedy: {i['remedy']}): {i['finding']} Consequence: {i['consequence_for_claim']}{shown}")
                     lines.extend(f"    - {'verified' if q['quote_verified'] else 'UNVERIFIED'} {q['source']}: {q['quote']}" for q in i['evidence'])
                 lines.append('')

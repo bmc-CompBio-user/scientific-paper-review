@@ -9,6 +9,7 @@ ABSENCE = re.compile(r"\b(not (?:explicitly |clearly |always )?(?:stated|specifi
 FIGURE_BORNE = (
     ('time points', re.compile(r'\b(?:time[- ]?points?|timepoints|sampling times?|harvest(?:ed|ing)? times?|exact times?|which time|specific (?:days|hours|times)|days? post|hours? post|which days|number of days|the days)\b', re.I)),
     ('doses or concentrations', re.compile(r'\b(?:concentrations?|doses?|dosage|amounts? of (?:plasmid|siRNA|drug|DNA|protein)|titration|dose[- ]response)\b', re.I)),
+    ('data points or error bars shown', re.compile(r'\b(?:individual (?:data )?points|data points (?:are |were )?(?:shown|plotted|displayed)|error bars? (?:are |is )?(?:shown|plotted|present|displayed))\b', re.I)),
     ('scale or axis', re.compile(r'\b(?:scale bars?|axis|axes|y-axis|x-axis|axis labels?|log(?:arithmic)? scale|magnification|unit(?:s)? of the)\b', re.I)),
     ('panel annotations', re.compile(r'\b(?:annotat(?:ed|ions?)|labell?ed|labels?|marker lanes?|molecular weight|loading control shown|lane labels?|legend of the (?:panel|graph)|channel)\b', re.I)),
 )
