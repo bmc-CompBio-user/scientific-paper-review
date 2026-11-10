@@ -800,7 +800,8 @@ class PipelineTests(unittest.TestCase):
         item = lambda name, finding: {'item': name, 'status': 'concern', 'finding': finding, 'evidence': [], 'remedy': 'clarify_reporting', 'consequence_for_claim': ''}
         checks = [{'experiment_id': f'E{n}', 'label': f'Fig {n}', 'items': [item('unit_of_inference', f'The data were compiled from {n + 1} experiments but the model does not say whether experiment was a factor.'), item('uncertainty_display', f'Error bars in panel {n} are not defined.')]} for n in range(1, 5)]
         groups, rest = recurring_issues(checks)
-        self.assertTrue(any('compiled' in g['theme'] and len(g['labels']) == 4 for g in groups))
+        self.assertEqual(sorted(len(g['labels']) for g in groups), [4, 4])
+        self.assertEqual(sorted(g['aspects'][0] for g in groups), ['uncertainty_display', 'unit_of_inference'])
         self.assertEqual(sum(len(g['items']) for g in groups) + len(rest), 8)
         answered = [{'experiment_id': 'E9', 'label': 'Fig 9', 'items': [{**item('unit_of_inference', 'The data were compiled from 2 experiments and so on.'), 'figure_check': {'answer': 'visible'}}]}]
         self.assertEqual(recurring_issues(answered), ([], []))
