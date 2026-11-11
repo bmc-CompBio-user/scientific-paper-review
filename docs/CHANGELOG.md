@@ -1,5 +1,9 @@
 # Changes
 
+## Package 1.8.0: snapshot for use as a support reviewer
+
+Package version raised to 1.8.0 to match rubric 1.8.0. New: `paper-review trim` (drops reference pages and suggests method pages), `paper-review summary` (executive summary with 0 to 5 scores per dimension), `docs/SUPPORT_REVIEWER.md` (configuration, procedure, measured reliability and limits) and `examples/support-reviewer.example.json`. Rubrics 1.4.0 to 1.7.0 (experiment inventory, per-experiment checks, knowledge graph as context) and their evaluation are documented above; 1.8.0 is the recommended rubric. Tag: `support-reviewer-1.8.0`.
+
 ## Running headers, repeated problems, legends (apply from rubric 1.8.0 on, header filter for all rubrics)
 
 Prompted by the second rating sheet. (1) Extraction removes running headers, footers, page numbers and margin text: short blocks in a page margin whose text, with digits masked, recurs on at least a third of the pages (at least three) of a document with four or more pages. This removes the bioRxiv licence header that had ended up inside text chunks. Removed examples are listed in the extraction warnings (`running_header_footer_removed`); the block IDs of a new extraction differ from earlier extractions of the same file. (2) The report groups per-experiment concerns that repeat one issue (a phrase of three to four content words shared by concerns of at least three experiments, for example data compiled from several experiments) into one entry that names the affected experiments and aspects and gives one example with its quotes; ungrouped concerns follow by experiment, and the full list stays in `expchecks.json`. Concerns about the scope of a conclusion or the completeness of controls (aspects rated less reliable) are shown in a separate suggestions block. (3) The per-experiment checks of rubric 1.8.0 receive the legend of the experiment's figure(s), and the figure-borne pattern covers days and hours after a treatment.

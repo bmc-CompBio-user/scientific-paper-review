@@ -1,0 +1,22 @@
+{
+  "settings": {
+    "rubric": "scientific-method-v1.8.0",
+    "num_ctx": 196608,
+    "review_text_chars": 500000,
+    "page_num_predict": 8192,
+    "review_num_predict": 20000,
+    "method_text_chars": 64000
+  },
+  "papers": [
+    {
+      "id": "study-001",
+      "title": "Replace with the manuscript title",
+      "domain": "experimental life science",
+      "independence_group": "study-001",
+      "exploratory": false,
+      "documents": [
+        {"id": "main", "path": "/absolute/path/to/main_trimmed.pdf", "method_pages": [8, 9, 10, 11]}
+      ]
+    }
+  ]
+}

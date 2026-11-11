@@ -831,6 +831,24 @@ class PipelineTests(unittest.TestCase):
         self.assertIn('A claim.', text)
         self.assertIn('not a judgement of the biology', text)
 
+    def test_trim_drops_reference_pages_and_suggests_method_pages(self):
+        from scientific_review.prepare import suggest, trim
+        path = self.root/'paper.pdf'
+        document = pymupdf.open()
+        bodies = ['Introduction\nThe study asks one question about cells.', 'Results\nFigure 1 shows the effect of treatment.', 'Methods\nCells were cultured for 24 hours.\nStatistical analysis was done with a t test.',
+                  'References\n' + '\n'.join(f'{n}. Author A, Author B. Journal of Things. {2000 + n % 20};{n}:1-9. (2015) (2016)' for n in range(1, 25))]
+        for body in bodies:
+            page = document.new_page(width=400, height=500)
+            page.insert_textbox((30, 30, 370, 470), body, fontsize=7)
+        document.save(path); document.close()
+        plan = suggest(path)
+        self.assertEqual(plan['drop'], [4])
+        self.assertEqual(plan['method_pages'], [3])
+        out = self.root/'trimmed.pdf'
+        trim(path, out)
+        with pymupdf.open(out) as trimmed:
+            self.assertEqual(len(trimmed), 3)
+
     def test_caption_pattern_accepts_common_journal_styles(self):
         from scientific_review.pdf import CAPTION
         for text in ('Figure 1. Legend', 'Fig. 2: Legend', 'Fig. 3 | Legend', 'Figure S4 \u2014 Legend', 'Fig. 5 \u2013 Legend'):

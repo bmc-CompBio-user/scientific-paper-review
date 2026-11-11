@@ -26,6 +26,10 @@ def main(argv=None):
     p.add_argument('manifest')
     p = sub.add_parser('report')
     p.add_argument('run_root')
+    p = sub.add_parser('trim', help='Drop reference pages from a PDF and suggest method pages')
+    p.add_argument('pdf')
+    p.add_argument('--out', required=True)
+    p.add_argument('--id', default='study-001')
     p = sub.add_parser('summary')
     p.add_argument('run_root')
     p = sub.add_parser('evaluate')
@@ -42,6 +46,10 @@ def main(argv=None):
         elif args.command == 'report':
             render_report(Path(args.run_root))
             print(str(Path(args.run_root)/'report.md'))
+        elif args.command == 'trim':
+            from .prepare import trim, manifest_entry
+            plan = trim(args.pdf, args.out)
+            print(json.dumps({**plan, 'manifest_entry': manifest_entry(args.id, args.out, plan)}, indent=2))
         elif args.command == 'summary':
             from .pipeline import write_summaries
             for path in write_summaries(Path(args.run_root)):

@@ -4,6 +4,8 @@ A reproducible local Python workflow for reviewing scientific reasoning in PDF p
 
 The review concentrates on experimental design, causal inference, interpretation versus hypotheses, evidence strength, triangulation, orthogonal validation, and consequential missing validation. It produces a review for human assessment, not an acceptance decision or an automatic scientific quality score.
 
+**To use the pipeline as a support reviewer, start with [docs/SUPPORT_REVIEWER.md](docs/SUPPORT_REVIEWER.md)**: the recommended configuration (rubric 1.8.0), the procedure, what the executive summary and report contain, how far the findings can be trusted, and the known limits.
+
 The intended first cohort is approximately 20 independent studies. Ordinary model mistakes are retained. Human annotations identify material errors recurring across independent studies before a future protocol is changed. Production prompts use a study-independent scientific rubric.
 
 ## Install
