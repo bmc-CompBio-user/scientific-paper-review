@@ -18,6 +18,17 @@ RATING_POINTS = {'very_strong': 1.0, 'strong': 0.85, 'moderate': 0.6, 'weak': 0.
 LABEL = {5: 'few concerns', 4: 'some concerns', 3: 'several concerns', 2: 'many concerns', 1: 'extensive concerns', 0: 'extensive concerns'}
 
 
+def first_sentences(text, limit=400):
+    text = ' '.join(str(text).split())
+    if len(text) <= limit:
+        return text
+    cut = max(text.rfind(end, 0, limit) for end in ('. ', '! ', '? '))
+    if cut >= 0:
+        return text[:cut + 1]
+    first = min((i for i in (text.find(end) for end in ('. ', '! ', '? ')) if i >= 0), default=-1)
+    return text[:first + 1] if first >= 0 else text[:limit].rsplit(' ', 1)[0] + ' …'
+
+
 def half(score):
     return max(0.0, min(5.0, round(score * 2) / 2))
 
@@ -109,7 +120,7 @@ def executive_summary(code, title, source, checks, review, coverage):
     lines += ['']
     lines += ['## Main formal issues, recurring across experiments', '']
     for g in groups[:5]:
-        lines.append(f"- {g['theme']}: {len(g['items'])} concerns in {len(g['labels'])} experiments ({', '.join(g['aspects'])}). Example ({representative(g)['label']}): {representative(g)['finding'][:260]}")
+        lines.append(f"- {g['theme']}: {len(g['items'])} concerns in {len(g['labels'])} experiments ({', '.join(g['aspects'])}). Example ({representative(g)['label']}): {first_sentences(representative(g)['finding'])}")
     if not groups:
         lines.append('- none grouped')
     statuses = [f['status'] for f in review.get('reporting_and_statistics', [])]
