@@ -20,6 +20,8 @@ Apple silicon or a Linux machine with enough memory for `qwen3.5:122b-a10b` (abo
 
 Recommended settings: rubric `scientific-method-v1.8.0`, `num_ctx` 196608, `review_text_chars` 500000 (540000 for papers of 45 pages or more; check the review prompt stays below about 176,000 tokens), `page_num_predict` 8192, `review_num_predict` 20000, `method_text_chars` 64000. Other settings keep their defaults.
 
+Rubric `scientific-method-v1.9.0` is an optional, faster layout (about 25 percent less model time on a 39-page paper) but gives different findings: fewer concerns per experiment, a different experiment inventory and claim set. It has not been validated against the reviewed findings, so keep 1.8.0 for support-reviewer work. See the 1.9.0 entry in `docs/CHANGELOG.md`.
+
 If a run stops: read `status.json` and the failed attempt, fix the cause, and use a new run ID (code changes need a new run ID); `--retry-failed` retries a failed call; `--reuse-completed-from <run>` reuses completed page results of an earlier run of the same paper; `--reuse-also crosscheck,experiments` also reuses those stages.
 
 ## What you get
