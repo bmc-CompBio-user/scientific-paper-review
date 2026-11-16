@@ -124,13 +124,37 @@ def quality_flags(value, source_ids, stage):
     return flags
 
 
-def call(folder, *, stage, prompt, images, source_ids, settings, retry_failed=False, transport=http):
+def system_message(settings, shared=None):
+    rubric = (PACKAGE / 'prompts' / (settings['rubric'] + '.md')).read_text()
+    return rubric + '\n\n' + shared if shared else rubric
+
+
+def warm_prefix(folder, *, stage, shared, settings, transport=http):
+    """Process the system message with the shared block once, so the server stores a checkpoint at its end.
+
+    The model keeps recurrent state, so the server can only resume from checkpoints, not from an arbitrary common prefix. The request produces one token and is not a review call; it never fails the run."""
+    payload = {'model': settings['model'], 'stream': False, 'think': False,
+               'messages': [{'role': 'system', 'content': system_message(settings, shared)}, {'role': 'user', 'content': 'ok'}],
+               'options': {'temperature': settings['temperature'], 'seed': settings['seed'], 'num_ctx': settings['num_ctx'], 'num_predict': 1}}
+    folder.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    try:
+        response = transport(settings['host'], '/api/chat', payload, settings['timeout_seconds'])
+        record = {'stage': stage, 'status': 'complete', 'wall_seconds': time.monotonic() - started,
+                  **{k: response[k] for k in ('prompt_eval_count', 'prompt_eval_duration') if k in response}}
+    except Exception as exc:
+        record = {'stage': stage, 'status': 'failed', 'error': str(exc), 'wall_seconds': time.monotonic() - started}
+    write(folder / f'{stage}.json', {**record, 'ended': now()})
+    return record
+
+
+def call(folder, *, stage, prompt, images, source_ids, settings, retry_failed=False, transport=http, shared=None):
     folder.mkdir(parents=True, exist_ok=True)
     schema = source_schema(stage, source_ids, settings)
     # Structural validation is separate from citation consistency warnings.
     basic_schema = read(stage_schema(stage, settings))
     payload = {'model': settings['model'], 'stream': False, 'think': False, 'format': schema,
-        'messages': [{'role': 'system', 'content': (PACKAGE / 'prompts' / (settings['rubric'] + '.md')).read_text()},
+        'messages': [{'role': 'system', 'content': system_message(settings, shared)},
                      {'role': 'user', 'content': prompt}],
         'options': {'temperature': settings['temperature'], 'seed': settings['seed'],
                     'num_ctx': settings['num_ctx'], 'num_predict': settings[stage + '_num_predict']}}

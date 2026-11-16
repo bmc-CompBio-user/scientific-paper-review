@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "answer": {
+      "type": "string",
+      "enum": [
+        "visible",
+        "not_visible",
+        "cannot_tell"
+      ]
+    },
+    "visible_text": {
+      "type": "string"
+    },
+    "panel": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "answer",
+    "visible_text",
+    "panel"
+  ]
+}

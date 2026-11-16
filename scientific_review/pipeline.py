@@ -6,7 +6,7 @@ from pathlib import Path
 import jsonschema
 import pymupdf
 from . import __version__
-from .common import PACKAGE, has_crosscheck, has_expchecks, has_figcheck, has_inventory, has_kg, kg_stages, stage_prompt, digest, fingerprint, implementation_hash, lock, now, read, safe_id, write
+from .common import PACKAGE, has_crosscheck, has_expchecks, has_figcheck, has_inventory, has_kg, has_shared_prefix, kg_stages, stage_prompt, digest, fingerprint, implementation_hash, lock, now, read, safe_id, write
 from .config import load
 from .pdf import extract
 from .aggregate import recurring_issues, representative
@@ -15,7 +15,7 @@ from .figures import figure_pages, legend_text
 from .kg import figure_keys, kg_digest, render_kg, render_kg_for_entry
 from .scope import coverage_statement, scope_flag
 from .scorecard import executive_summary
-from .provider import call, identity
+from .provider import call, identity, warm_prefix
 from .reuse import import_page_job
 
 
@@ -80,6 +80,16 @@ def inventory(sources):
              'caption_candidates': p['caption_candidates'], 'figure_mentions': p.get('figure_mentions', [])} for p in sources['pages']]
 
 
+SHARED_NOTE = {'page': 'Apply the page-stage instructions in the system message to the target page below. The original methods context and the document inventory are given in the system message; this message holds the source map of the target page, its original text and the related legend candidates.',
+               'expcheck': 'Apply the experiment-check instructions in the system message to the experiment below. The original methods context is given in the system message; this message holds the inventory entry of the experiment and the original text of its cited pages.'}
+
+
+def page_shared(sources, settings):
+    """Text identical in every page call of one paper (rubric 1.9.0 and later): stage instructions, methods context and document inventory."""
+    methods, _ = method_context(sources, settings)
+    return stage_prompt('page', settings) + '\n\nORIGINAL METHODS CONTEXT\n' + methods + '\n\nDOCUMENT INVENTORY\n' + json.dumps(inventory(sources), ensure_ascii=False)
+
+
 def page_prompt(page, sources, settings):
     methods, omitted_methods = method_context(sources, settings)
     text, omitted = select_blocks([page], settings['page_text_chars'])
@@ -106,6 +116,9 @@ def page_prompt(page, sources, settings):
                 'omitted_target_text_blocks': omitted, 'omitted_method_blocks': omitted_methods,
                 'omitted_related_caption_blocks': omitted_captions,
                 'caption_link_status': ('unlinked legend candidates because no figure number was extracted; inspect the images to assess relevance' if all_captions else 'label-matched candidates with possible continuation blocks; human verification required')}
+    if has_shared_prefix(settings):
+        evidence.pop('document_inventory')
+        return SHARED_NOTE['page'] + '\n\nSOURCE MAP\n' + json.dumps(evidence, ensure_ascii=False) + '\n\nTARGET ORIGINAL TEXT\n' + text + '\n\nRELATED ORIGINAL CAPTION CANDIDATES\n' + captions
     prompt = stage_prompt('page', settings) + '\n\nSOURCE MAP\n' + json.dumps(evidence, ensure_ascii=False) + '\n\nTARGET ORIGINAL TEXT\n' + text + '\n\nORIGINAL METHODS CONTEXT\n' + methods + '\n\nRELATED ORIGINAL CAPTION CANDIDATES\n' + captions
     return prompt
 
@@ -201,6 +214,12 @@ def verify_experiments(result, sources):
     return {**result, 'experiments': [{**e, 'evidence': [{**q, 'quote_verified': verified(q)} for q in e['evidence']]} for e in result['experiments']]}
 
 
+def expcheck_shared(sources, settings):
+    """Text identical in every per-experiment check of one paper (rubric 1.9.0 and later)."""
+    methods, _ = method_context(sources, settings)
+    return stage_prompt('expcheck', settings) + '\n\nORIGINAL METHODS CONTEXT\n' + methods
+
+
 def expcheck_prompt(entry, sources, settings, kg=None):
     cited = {q['source'].rsplit('.', 1)[0] for q in entry['evidence']}
     clean = {k: v for k, v in entry.items() if k != 'evidence'}
@@ -211,6 +230,9 @@ def expcheck_prompt(entry, sources, settings, kg=None):
     if has_figcheck(settings):
         legend = legend_text(sources, figure_keys(entry.get('label', '')))
         legends = '\n\nFIGURE LEGEND(S) OF THIS EXPERIMENT (original text)\n' + legend if legend else ''
+    if has_shared_prefix(settings):
+        return (SHARED_NOTE['expcheck'] + '\n\nEXPERIMENT INVENTORY ENTRY\n' + json.dumps(clean, ensure_ascii=False) +
+                '\n\nORIGINAL TEXT OF THE CITED PAGES\n' + text + legends + ('\n\n' + kg if kg else '')), omitted + omitted_methods
     return (stage_prompt('expcheck', settings) + '\n\nEXPERIMENT INVENTORY ENTRY\n' + json.dumps(clean, ensure_ascii=False) +
             '\n\nORIGINAL TEXT OF THE CITED PAGES\n' + text + '\n\nORIGINAL METHODS CONTEXT\n' + methods + legends + ('\n\n' + kg if kg else '')), omitted + omitted_methods
 
@@ -423,6 +445,10 @@ def write_summaries(root):
     return written
 
 
+def job_complete(folder):
+    return any((a/'state.json').exists() and read(a/'state.json')['status'] == 'complete' for a in folder.glob('attempt_*'))
+
+
 def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_jobs=None, retry_failed=False, reuse_completed_from=None, reuse_also=()):
     config = load(manifest)
     root = Path(runs).resolve()/safe_id(run_id)
@@ -468,6 +494,8 @@ def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_j
                 write(directory/'status.json', {'status': 'running', 'started': now()})
                 results = []
                 methods, _ = method_context(sources, config['settings'])
+                shared = page_shared(sources, config['settings']) if has_shared_prefix(config['settings']) else None
+                warmed = False
                 for page in sources['pages']:
                     stage = directory/'page_jobs'/page['id']
                     if reuse_completed_from:
@@ -476,9 +504,12 @@ def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_j
                     if not successful and max_page_jobs is not None and jobs >= max_page_jobs:
                         write(directory/'status.json', {'status': 'paused_page_limit', 'page_results': len(results), 'total_pages': len(sources['pages'])})
                         break
+                    if shared and not successful and not warmed:
+                        warm_prefix(directory/'warmups', stage='page', shared=shared, settings=config['settings'])
+                        warmed = True
                     result = call(stage, stage='page', prompt=page_prompt(page, sources, config['settings']),
                         images=[directory/'sources'/i['path'] for i in page['images']], source_ids=source_ids(sources),
-                        settings=config['settings'], retry_failed=retry_failed)
+                        settings=config['settings'], retry_failed=retry_failed, shared=shared)
                     if result['page_id'] != page['id']:
                         # Keep the scientific response; attribution mismatch is a warning for human review.
                         write(stage/'attribution_warning.json', {'expected_page': page['id'], 'returned_page': result['page_id']})
@@ -522,14 +553,20 @@ def execute(manifest, run_id, runs, *, prepare=False, paper_ids=None, max_page_j
                 expchecks = None
                 if has_expchecks(config['settings']):
                     expchecks = []
+                    shared = expcheck_shared(sources, config['settings']) if has_shared_prefix(config['settings']) else None
+                    warmed = False
                     for number, entry in enumerate(experiments['experiments'], 1):
                         excerpt = render_kg_for_entry(paper['kg_dir'], entry, config['settings']['kg_check_chars']) if 'expcheck' in kg_use else None
                         prompt, omitted = expcheck_prompt(entry, sources, config['settings'], excerpt)
                         if excerpt:
                             (directory/'expcheck_jobs').mkdir(exist_ok=True)
                             (directory/'expcheck_jobs'/f'{number:02d}.kg_excerpt.txt').write_text(excerpt, encoding='utf-8')
-                        found = call(directory/'expcheck_jobs'/f'{number:02d}', stage='expcheck', prompt=prompt, images=[], source_ids=source_ids(sources),
-                            settings=config['settings'], retry_failed=retry_failed)
+                        job = directory/'expcheck_jobs'/f'{number:02d}'
+                        if shared and not warmed and not job_complete(job):
+                            warm_prefix(directory/'warmups', stage='expcheck', shared=shared, settings=config['settings'])
+                            warmed = True
+                        found = call(job, stage='expcheck', prompt=prompt, images=[], source_ids=source_ids(sources),
+                            settings=config['settings'], retry_failed=retry_failed, shared=shared)
                         expchecks.append({**verify_expchecks(found, sources), 'label': entry['label']})
                     if has_figcheck(config['settings']):
                         expchecks = run_figchecks(expchecks, sources, config['settings'], directory, retry_failed)

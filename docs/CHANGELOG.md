@@ -1,5 +1,11 @@
 # Changes
 
+## Rubric 1.9.0 (speed only, opt-in): shared prefix and warm-up
+
+Prompts and schemas are copies of 1.8.0; only the layout of two stages changes, to let the server reuse work between calls. For the page calls and the per-experiment checks, the text that is identical across the calls of one paper (stage instructions, original methods context, and for pages the document inventory) moves from the user message into the system message, after the rubric. The user message keeps what differs per call. Before the first call of each of the two stages the pipeline sends one warm-up request (the system message alone, one output token, no schema; recorded in `papers/<id>/warmups/<stage>.json`; a failed warm-up never fails the run).
+
+Why: the model keeps recurrent state, so Ollama (llama.cpp runner) can resume only from a checkpoint, not from an arbitrary common prefix, and it places page images before the user text, so nothing in the user message can be cached. A request that ends exactly at the shared text leaves a checkpoint there. Measured on a 37k-token page prompt: prefill 58 s without, 48 s with a 12k-token shared prefix (system message and methods only). Not measured yet on a full run: the effect of also moving the inventory, the per-experiment checks, and whether findings change (text order can change model output). Runs with 1.9.0 cannot import page results from 1.8.0 runs (the requests differ).
+
 ## Package 1.8.0: snapshot for use as a support reviewer
 
 Package version raised to 1.8.0 to match rubric 1.8.0. New: `paper-review trim` (drops reference pages and suggests method pages), `paper-review summary` (executive summary with 0 to 5 scores per dimension), `docs/SUPPORT_REVIEWER.md` (configuration, procedure, measured reliability and limits) and `examples/support-reviewer.example.json`. Rubrics 1.4.0 to 1.7.0 (experiment inventory, per-experiment checks, knowledge graph as context) and their evaluation are documented above; 1.8.0 is the recommended rubric. Tag: `support-reviewer-1.8.0`.

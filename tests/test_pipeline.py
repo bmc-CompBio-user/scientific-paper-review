@@ -10,7 +10,7 @@ from scientific_review.config import DEFAULTS, load
 from scientific_review.evaluation import evaluate
 from scientific_review.pdf import extract
 from scientific_review.pipeline import execute, review_prompt, page_prompt
-from scientific_review.provider import call, OperationalError, quality_flags, source_schema
+from scientific_review.provider import call, warm_prefix, OperationalError, quality_flags, source_schema
 from scientific_review.reuse import import_page_job
 
 
@@ -771,6 +771,67 @@ class PipelineTests(unittest.TestCase):
             self.assertFalse(errors)
             prompt = (root/'papers/s1/review_job/attempt_001/prompt.txt').read_text()
             self.assertIn('"figure_check": "not_visible"', prompt)
+
+    def test_rubric_v190_shares_methods_and_inventory_in_the_system_message_and_warms_once(self):
+        import re
+        seen, warm_fail = [], []
+        def transport(host, route, payload=None, timeout=30):
+            if route == '/api/tags':
+                return {'models': [{'name': DEFAULTS['model'], 'digest': 'synthetic-digest'}]}
+            if route == '/api/version':
+                return {'version': 'synthetic'}
+            seen.append(payload)
+            if 'format' not in payload:
+                if warm_fail:
+                    raise OSError('server busy')
+                return {'done': True, 'done_reason': 'stop', 'prompt_eval_count': 10, 'prompt_eval_duration': 1, 'message': {'content': ''}}
+            value = blank(payload['format'])
+            content = payload['messages'][0]['content'] + payload['messages'][1]['content']
+            if 'page_id' in value:
+                value['page_id'] = 'main.p001' if '"target_page": "main.p001"' in payload['messages'][1]['content'] else 'main.p002'
+            if 'experiments' in value:
+                block = re.search(r'\[(main\.p\d+\.b\d+)\] [^\[]*?Three independent cultures per group', content)
+                entry = blank(payload['format']['properties']['experiments']['items'])
+                entry.update(id='E1', label='Fig 1', replicate_unit='independent_biological', hypothesis_timing='unclear',
+                             evidence=[{'source': block[1], 'quote': 'Three independent cultures per group', 'supports': 'N'}])
+                value['experiments'] = [entry]
+            if 'items' in value:
+                value.update(experiment_id='E1', items=[])
+            return {'done': True, 'done_reason': 'stop', 'message': {'content': json.dumps(value)}}
+        config = read(self.manifest)
+        config['settings']['rubric'] = 'scientific-method-v1.9.0'
+        write(self.manifest, config)
+        patches = (patch('scientific_review.provider.http', transport), patch('scientific_review.pipeline.call', side_effect=lambda *a, **k: call(*a, **k, transport=transport)),
+                   patch('scientific_review.pipeline.warm_prefix', side_effect=lambda *a, **k: warm_prefix(*a, **k, transport=transport)))
+        with patches[0], patches[1], patches[2]:
+            root, errors = execute(self.manifest, 'shared', self.root/'runs')
+            self.assertFalse(errors)
+            warms = [p for p in seen if 'format' not in p]
+            pages = [p for p in seen if 'format' in p and '"target_page"' in p['messages'][1]['content']]
+            self.assertEqual(len(warms), 2)
+            self.assertEqual(len(pages), 2)
+            for warm in warms:
+                self.assertEqual(warm['options']['num_predict'], 1)
+                self.assertEqual(warm['messages'][1]['content'], 'ok')
+            self.assertEqual(warms[0]['messages'][0]['content'], pages[0]['messages'][0]['content'])
+            self.assertEqual(pages[0]['messages'][0]['content'], pages[1]['messages'][0]['content'])
+            system, user = pages[0]['messages'][0]['content'], pages[0]['messages'][1]['content']
+            self.assertIn('ORIGINAL METHODS CONTEXT', system)
+            self.assertIn('DOCUMENT INVENTORY', system)
+            self.assertIn('METHOD DETAILS', system)
+            self.assertNotIn('ORIGINAL METHODS CONTEXT', user)
+            self.assertNotIn('document_inventory', user)
+            self.assertNotIn('METHOD DETAILS', user)
+            self.assertIn('TARGET ORIGINAL TEXT', user)
+            self.assertEqual(read(root/'papers/s1/warmups/page.json')['status'], 'complete')
+            self.assertEqual(read(root/'papers/s1/warmups/expcheck.json')['status'], 'complete')
+            before = len(seen)
+            execute(self.manifest, 'shared', self.root/'runs')
+            self.assertEqual(len(seen), before)
+            warm_fail.append(1)
+            root, errors = execute(self.manifest, 'shared-warm-fails', self.root/'runs')
+            self.assertFalse(errors)
+            self.assertEqual(read(root/'papers/s1/warmups/page.json')['status'], 'failed')
 
     def test_running_headers_and_footers_are_removed_but_body_text_stays(self):
         path = self.root/'journal.pdf'
